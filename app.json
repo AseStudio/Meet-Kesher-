@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Kesher",
+    "slug": "Kesher",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "light",
+    "scheme": "kesher",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.studioase.kesher"
+    },
+    "android": {
+      "package": "com.studioase.kesher",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#E6F4FE"
+      }
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      "expo-sharing",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ea4cfc78-340e-4ab7-8d24-696676708d1e"
+      }
+    },
+    "owner": "ase26"
+  }
+}
