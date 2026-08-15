@@ -24,7 +24,14 @@ const VOLUME_THRESHOLD = 10;
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
-  const { scale, isTablet, isDesktop } = useResponsive();
+  const { scale, isTablet, isDesktop, width, height } = useResponsive();
+  // On a phone held upright, a persistent side column (attendee strip)
+  // plus a persistent side toolbar leave very little width for the
+  // actual speaker video — that's the "half covered" bug. Below the
+  // tablet breakpoint, in portrait, stack everything vertically instead
+  // (strip on top, toolbar on bottom, video gets full width) so it
+  // adapts live when the device rotates, not just at load time.
+  const isPortraitPhone = !isTablet && height > width;
   const styles = useSessionMainStyles(scale);
 
   // Video states
@@ -136,11 +143,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // gets set without this file ever touching PollScreen's own realtime
   // topic (session-poll-${id}).
   const [pollNotice, setPollNotice] = useState(false);
-  // Live count for the toolbar's Waitlist badge — mirrors the same
-  // realtime-on-session_waitlist pattern LobbyScreen uses for its own
-  // "N waiting" badge, just surfaced here too since the host is often
-  // already past the Lobby by the time the session actually fills up.
-  const [waitlistCount, setWaitlistCount] = useState(0);
 
   // Refs
   const agoraSessionRef = useRef(null);
@@ -310,28 +312,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
         pushToast(`📊 New poll: ${p.question}`);
         setPollNotice(true);
       })
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [session?.id]);
-
-  // Own realtime topic (session-waitlist-watch), same reasoning as the
-  // two watchers above — session_waitlist already has its own
-  // subscribers elsewhere (WaitlistScreen.js, LobbyScreen.js's own
-  // badge), so this is purely for the toolbar badge count here and
-  // never touches those.
-  useEffect(() => {
-    if (!session?.id) return;
-    const loadCount = async () => {
-      const { data } = await supabase.rpc('get_waitlist_count', { p_session_id: session.id });
-      setWaitlistCount(data ?? 0);
-    };
-    loadCount();
-    const ch = supabase
-      .channel(`session-waitlist-watch-${session.id}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'session_waitlist',
-        filter: `session_id=eq.${session.id}`,
-      }, loadCount)
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [session?.id]);
@@ -596,11 +576,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
 };
 
   const leaveAgora = async () => {
-    try {
-      await agoraSessionRef.current?.leave();
-    } catch (e) {
-      console.log('Agora leave error (non-fatal):', e.message);
-    }
+    await agoraSessionRef.current?.leave();
     agoraSessionRef.current = null;
   };
 
@@ -899,20 +875,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
         text: 'End session',
         style: 'destructive',
         onPress: async () => {
-          // The status update — the part that actually ends the session
-          // for everyone — now goes FIRST and is checked. It used to run
-          // after an unguarded leaveAgora() call; any Agora hiccup there
-          // (network blip, an already half-left client) threw, and since
-          // neither call was wrapped in try/catch, the whole handler
-          // silently died right there — the DB update and the navigate
-          // below it never ran. That's the bug: "End session" doing
-          // nothing was Agora's disconnect failing, not the session logic.
-          const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
-          if (error) {
-            Alert.alert('Could not end session', error.message);
-            return;
-          }
-          await leaveAgora(); // already internally try/caught — can't block the line above anymore
+          await leaveAgora();
+          await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
           navigation.navigate('EndSession', { session });
         },
       },
@@ -1014,7 +978,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
     { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
-    { icon: 'hourglass-outline', label: 'Waitlist', action: () => navigation.navigate('Waitlist', { session }), badge: waitlistCount },
     { icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: () => setRecording(!recording), red: true },
     { icon: 'power-outline', label: 'End', action: endSession, end: true },
   ];
@@ -1065,11 +1028,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
         </View>
       )}
 
-      <View style={styles.mainContent}>
+      <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
 
         {/* ─── ATTENDEE STRIP — video cells ─── */}
-        <View style={styles.attendeeStrip}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
+        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]}>
+          <ScrollView
+            horizontal={isPortraitPhone}
+            showsVerticalScrollIndicator={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={isPortraitPhone ? styles.stripContentHorizontal : styles.stripContent}
+          >
             {remoteUsers.map((user, i) => {
               // This user's track is already playing full-size (speaker
               // view), in the board PiP stack, or in the Gallery grid —
@@ -1344,7 +1312,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
         )}
 
         {/* Toolbar */}
-        <ScrollView style={styles.toolbarScroll} contentContainerStyle={styles.toolbar} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          horizontal={isPortraitPhone}
+          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
+          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+        >
           {tools.map((tool, i) => (
             <TouchableOpacity
               key={i}
@@ -1607,10 +1581,16 @@ function useSessionMainStyles(scale) {
   signalChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(91,46,255,0.25)', borderWidth: 1, borderColor: 'rgba(91,46,255,0.5)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
   signalChipText: { color: colors.white, fontSize: 11, fontWeight: '600', flexShrink: 1 },
   mainContent: { flex: 1, flexDirection: 'row' },
+  mainContentPortrait: { flexDirection: 'column' },
 
   // ── ATTENDEE STRIP ──
   attendeeStrip: { width: scale(104), backgroundColor: '#0D0D2B', paddingVertical: 6 },
+  // Portrait phone: strip becomes a horizontal bar along the top instead
+  // of eating a fixed column's worth of the screen's (already scarce)
+  // width — same cells, same ScrollView, just laid out sideways.
+  attendeeStripHorizontal: { width: '100%', height: scale(108), paddingVertical: 0, paddingHorizontal: 6 },
   stripContent: { alignItems: 'center', gap: 10, paddingBottom: 8 },
+  stripContentHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   stripCell: { width: scale(88), alignItems: 'center', gap: 3 },
   stripVideoWrap: {
     width: scale(88), height: scale(68),
@@ -1704,7 +1684,12 @@ function useSessionMainStyles(scale) {
 
   // ── TOOLBAR ──
   toolbarScroll: { width: scale(62), backgroundColor: '#0D0D2B' },
+  // Portrait phone: toolbar becomes a horizontal bottom bar — same
+  // buttons, same ScrollView, laid out sideways, so speakerView above
+  // it gets the full screen width instead of losing it to a side rail.
+  toolbarScrollHorizontal: { width: '100%', height: scale(80) },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
+  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
   toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.15)' },

@@ -39,6 +39,7 @@ import CommunityScreen from './src/screens/community/CommunityScreen';
 import CreateChannelScreen from './src/screens/community/CreateChannelScreen';
 import ChannelChatScreen from './src/screens/community/ChannelChatScreen';
 import ChannelRolesScreen from './src/screens/community/ChannelRolesScreen';
+import WaitlistScreen from './src/screens/session/WaitlistScreen';
 
 
 const Stack = createNativeStackNavigator();
@@ -101,6 +102,8 @@ export default function App() {
           <Stack.Screen name="CoHostManager" component={CoHostManager} options={PANEL_ANIMATION} />
           <Stack.Screen name="SessionFull" component={SessionFull} />
           <Stack.Screen name="BannedScreen" component={BannedScreen} />
+          <Stack.Screen name="Waitlist" component={WaitlistScreen} />
+
 
           {/* Community feature */}
           <Stack.Screen name="Community" component={CommunityScreen} />
