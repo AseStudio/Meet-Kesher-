@@ -7,6 +7,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { MAX_ATTENDEES_CAP } from '../../lib/constants';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
@@ -56,7 +57,7 @@ const generateCode = () => {
 export default function CreateSession({ navigation }) {
   const [title, setTitle] = useState('');
   const [selectedMode, setSelectedMode] = useState('classroom');
-  const [maxAttendees, setMaxAttendees] = useState(50);
+  const [maxAttendees, setMaxAttendees] = useState(MAX_ATTENDEES_CAP);
   const [waitlist, setWaitlist] = useState(true);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -184,8 +185,13 @@ export default function CreateSession({ navigation }) {
               <Ionicons name="remove" size={16} color={palette.ink} />
             </TouchableOpacity>
             <Text style={styles.counterValue}>{maxAttendees}</Text>
-            <TouchableOpacity style={styles.counterBtn} onPress={() => setMaxAttendees(maxAttendees + 1)} activeOpacity={0.7}>
-              <Ionicons name="add" size={16} color={palette.ink} />
+            <TouchableOpacity
+              style={[styles.counterBtn, maxAttendees >= MAX_ATTENDEES_CAP && styles.counterBtnDisabled]}
+              onPress={() => setMaxAttendees(Math.min(MAX_ATTENDEES_CAP, maxAttendees + 1))}
+              activeOpacity={0.7}
+              disabled={maxAttendees >= MAX_ATTENDEES_CAP}
+            >
+              <Ionicons name="add" size={16} color={maxAttendees >= MAX_ATTENDEES_CAP ? palette.inkMuted : palette.ink} />
             </TouchableOpacity>
           </View>
           <View style={styles.waitlistRow}>
@@ -193,6 +199,9 @@ export default function CreateSession({ navigation }) {
             <Switch value={waitlist} onValueChange={setWaitlist} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
           </View>
         </View>
+        {maxAttendees >= MAX_ATTENDEES_CAP && (
+          <Text style={styles.capNote}>{MAX_ATTENDEES_CAP} is the current limit while we scale up capacity.</Text>
+        )}
 
         <Text style={styles.label}>Session Password</Text>
         <View style={styles.inputRow}>
@@ -337,6 +346,8 @@ const styles = StyleSheet.create({
   attendeeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
   counterRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: palette.surface, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: palette.line, ...cardShadow },
   counterBtn: { width: 28, height: 28, borderRadius: 9, backgroundColor: palette.neutralSoft, alignItems: 'center', justifyContent: 'center' },
+  counterBtnDisabled: { opacity: 0.5 },
+  capNote: { fontSize: 11, color: palette.inkMuted, marginTop: 6, textAlign: 'right' },
   counterValue: { fontSize: 16, fontWeight: '800', color: palette.ink, minWidth: 30, textAlign: 'center' },
   waitlistRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   waitlistLabel: { fontSize: 13, fontWeight: '700', color: palette.ink },

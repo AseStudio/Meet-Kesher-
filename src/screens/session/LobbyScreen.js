@@ -211,10 +211,44 @@ export default function LobbyScreen({ navigation, route }) {
           .maybeSingle();
 
         if (!existing) {
-          await supabase.from('session_attendees').insert({
+          // Capacity check — this used to be missing entirely, so
+          // max_attendees was purely cosmetic (a progress bar with no
+          // enforcement behind it). This client-side check is the fast
+          // path for the common case; enforce_session_capacity (see the
+          // capacity migration) is the real backstop against two people
+          // joining in the same instant and both passing this check
+          // before either insert lands — that race can't be closed from
+          // the client alone.
+          const cap = session?.max_attendees;
+          if (cap) {
+            const { count } = await supabase
+              .from('session_attendees')
+              .select('id', { count: 'exact', head: true })
+              .eq('session_id', session.id)
+              .is('left_at', null);
+
+            if ((count || 0) >= cap) {
+              navigation.replace('SessionFull', { session });
+              return;
+            }
+          }
+
+          const { error: joinError } = await supabase.from('session_attendees').insert({
             session_id: session.id,
             user_id: user.id,
           });
+
+          // Covers the race the client-side check above can't close, and
+          // any future case where the trigger's reason changes — checking
+          // the message rather than a specific error code keeps this
+          // working even if the trigger's exact SQLSTATE isn't 'P0001'.
+          if (joinError) {
+            if (joinError.message?.toLowerCase().includes('full')) {
+              navigation.replace('SessionFull', { session });
+              return;
+            }
+            console.log('session_attendees insert error:', joinError.message);
+          }
         }
       }
 

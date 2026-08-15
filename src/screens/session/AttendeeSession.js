@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Modal, Alert
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { createAgoraSession } from '../../services/agora/AgoraService';
@@ -12,40 +12,16 @@ import VideoTile from '../../components/VideoTile';
 import WhiteboardCanvas from '../../components/WhiteboardCanvas';
 import GraphBoardCanvas from '../../components/GraphboardCanvas'; // note: file is "Graphboard" not "GraphBoard"
 import NotificationToastStack from '../../components/NotificationToast';
+import { ModeIcon, SIGNAL_ICON } from '../../lib/iconMeta';
+import { useResponsive } from '../../lib/responsive';
 
 const SPEAKER_SWITCH_DELAY = 600;
 const VOLUME_THRESHOLD = 10;
 
-// Mode → icon, so the top-bar badge actually reflects the session's real
-// mode instead of always showing the classroom icon (that was a display
-// bug in the previous emoji version — modeBadgeText hardcoded 🏫
-// regardless of session.mode). Same icon names used on CreateSession /
-// the dashboards, for consistency across the app.
-const MODE_ICON_META = {
-  classroom:   { icon: 'school-outline',    set: 'ion' },
-  interview:   { icon: 'briefcase-outline', set: 'ion' },
-  meeting:     { icon: 'people-outline',    set: 'ion' },
-  gettogether: { icon: 'party-popper',      set: 'mci' },
-};
-const DEFAULT_MODE_ICON = { icon: 'calendar-outline', set: 'ion' };
-function ModeIcon({ mode, size = 12, color = colors.white }) {
-  const meta = MODE_ICON_META[mode] || DEFAULT_MODE_ICON;
-  const IconSet = meta.set === 'mci' ? MaterialCommunityIcons : Ionicons;
-  return <IconSet name={meta.icon} size={size} color={color} />;
-}
-
-// Signal icon lookup — used by the toolbar buttons, the "Signal sent"
-// badge, and the SIGNALS row in the reactions modal, so there's one
-// place mapping key → icon instead of three separate emoji literals
-// that could drift out of sync.
-const SIGNAL_ICON = {
-  hand: 'hand-left-outline',
-  correction: 'alert-circle-outline',
-  speak: 'megaphone-outline',
-};
-
 export default function AttendeeSession({ navigation, route }) {
   const session = route.params?.session;
+  const { scale, isTablet, isDesktop } = useResponsive();
+  const styles = useAttendeeSessionStyles(scale);
   // Host-configured defaults from CreateSession — falls back to the
   // previous hardcoded behavior (muted, camera off) if this session
   // predates these columns or they were never set.
@@ -1109,7 +1085,8 @@ export default function AttendeeSession({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+function useAttendeeSessionStyles(scale) {
+  return useMemo(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A' },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, paddingTop: 20, backgroundColor: '#0D0D2B' },
   sessionTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
@@ -1125,7 +1102,7 @@ const styles = StyleSheet.create({
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
   liveText: { color: colors.green, fontSize: 10, fontWeight: '700' },
   callToBoardCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E1E3F', margin: 10, borderRadius: 14, padding: 14, gap: 10, borderWidth: 1, borderColor: colors.primary },
-  callToBoardIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(91,46,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  callToBoardIconWrap: { width: scale(40), height: scale(40), borderRadius: 12, backgroundColor: 'rgba(91,46,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   callToBoardInfo: { flex: 1 },
   callToBoardTitle: { color: colors.white, fontWeight: '700', fontSize: 14 },
   callToBoardSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
@@ -1142,11 +1119,11 @@ const styles = StyleSheet.create({
   mainContent: { flex: 1, flexDirection: 'row' },
 
   // ── STRIP — compact for attendee screen ──
-  attendeeStrip: { width: 80, backgroundColor: '#0D0D2B', paddingVertical: 6 },
+  attendeeStrip: { width: scale(80), backgroundColor: '#0D0D2B', paddingVertical: 6 },
   stripContent: { alignItems: 'center', gap: 8, paddingBottom: 8 },
-  stripCell: { width: 68, alignItems: 'center', gap: 3 },
+  stripCell: { width: scale(68), alignItems: 'center', gap: 3 },
   stripVideoWrap: {
-    width: 68, height: 54,
+    width: scale(68), height: scale(54),
     borderRadius: 8,
     overflow: 'hidden',
     borderWidth: 1.5,
@@ -1181,17 +1158,17 @@ const styles = StyleSheet.create({
   noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
   pipContainer: {
     position: 'absolute', bottom: 70, right: 14,
-    width: 88, height: 116,
+    width: scale(88), height: scale(116),
     borderRadius: 12, overflow: 'hidden',
     borderWidth: 2, borderColor: colors.primary,
   },
   boardViewFull: { flex: 1, position: 'relative', zIndex: 50 },
   pipStack: { position: 'absolute', top: 12, left: 12, zIndex: 60, gap: 6 },
-  stackPip: { width: 88, height: 114, borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
+  stackPip: { width: scale(88), height: scale(114), borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
   boardWatchBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
   boardWatchText: { color: colors.white, fontSize: 11, fontWeight: '600' },
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8, alignContent: 'flex-start' },
-  galleryCell: { width: 170, height: 130, borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
+  galleryCell: { width: scale(170), height: scale(130), borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
   galleryCellActive: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 2.5, borderColor: colors.green },
   galleryCellDots: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 4, zIndex: 10 },
   galleryCoHostBadge: {
@@ -1208,9 +1185,9 @@ const styles = StyleSheet.create({
   viewBtnText: { color: colors.white, fontSize: 11, fontWeight: '600' },
   signalBadge: { position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(91,46,255,0.8)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, left: '10%' },
   signalBadgeText: { color: colors.white, fontSize: 12, fontWeight: '600' },
-  toolbarScroll: { width: 62, backgroundColor: '#0D0D2B' },
+  toolbarScroll: { width: scale(62), backgroundColor: '#0D0D2B' },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
-  toolBtn: { width: 50, height: 50, borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnMuted: { backgroundColor: 'rgba(255,59,59,0.2)' },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.3)' },
@@ -1237,14 +1214,15 @@ const styles = StyleSheet.create({
   signalBtnActive: { borderColor: colors.primary, backgroundColor: 'rgba(91,46,255,0.3)' },
   signalBtnLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', textAlign: 'center', fontWeight: '600' },
   reactionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
-  reactionBtn: { width: 60, height: 60, borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
+  reactionBtn: { width: scale(60), height: scale(60), borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
   reactionEmoji: { fontSize: 30 },
   modOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modDropdown: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: 250, borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
+  modDropdown: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: scale(250), maxWidth: '92%', borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
   modDropdownHeader: { color: '#FFC107', fontWeight: '700', fontSize: 14, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
   modDropdownItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
   modDropdownText: { fontSize: 14, color: colors.white },
   modDropdownTextDanger: { color: colors.red },
   modDropdownClose: { paddingVertical: 10, alignItems: 'center' },
   modDropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
-});
+  }), [scale]);
+}
