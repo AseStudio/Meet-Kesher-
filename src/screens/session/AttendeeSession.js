@@ -20,7 +20,8 @@ const VOLUME_THRESHOLD = 10;
 
 export default function AttendeeSession({ navigation, route }) {
   const session = route.params?.session;
-  const { scale, isTablet, isDesktop } = useResponsive();
+  const { scale, isTablet, isDesktop, width, height } = useResponsive();
+  const isPortraitPhone = !isTablet && height > width;
   const styles = useAttendeeSessionStyles(scale);
   // Host-configured defaults from CreateSession — falls back to the
   // previous hardcoded behavior (muted, camera off) if this session
@@ -524,11 +525,7 @@ export default function AttendeeSession({ navigation, route }) {
   };
 
   const leaveAgoraOnly = async () => {
-    try {
-      await agoraSessionRef.current?.leave();
-    } catch (e) {
-      console.log('Agora leave error (non-fatal):', e.message);
-    }
+    await agoraSessionRef.current?.leave();
     agoraSessionRef.current = null;
   };
 
@@ -762,11 +759,16 @@ export default function AttendeeSession({ navigation, route }) {
         </View>
       )}
 
-      <View style={styles.mainContent}>
+      <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
 
         {/* ─── STRIP — host and other remote users ─── */}
-        <View style={styles.attendeeStrip}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
+        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]}>
+          <ScrollView
+            horizontal={isPortraitPhone}
+            showsVerticalScrollIndicator={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={isPortraitPhone ? styles.stripContentHorizontal : styles.stripContent}
+          >
             {remoteUsers.map((user, i) => {
               // This user's track is already playing in the board PiP
               // stack, as the big speaker-view tile, or in the Gallery
@@ -984,7 +986,13 @@ export default function AttendeeSession({ navigation, route }) {
         </View>
 
         {/* Attendee Toolbar */}
-        <ScrollView style={styles.toolbarScroll} contentContainerStyle={styles.toolbar} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          horizontal={isPortraitPhone}
+          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
+          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+        >
           <TouchableOpacity style={[styles.toolBtn, muted && styles.toolBtnMuted]} onPress={toggleMic}>
             <Ionicons name={muted ? 'mic-off-outline' : 'mic-outline'} size={18} color={colors.white} />
             <Text style={styles.toolLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
@@ -1121,10 +1129,13 @@ function useAttendeeSessionStyles(scale) {
   finishBtn: { backgroundColor: colors.white, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
   finishBtnText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   mainContent: { flex: 1, flexDirection: 'row' },
+  mainContentPortrait: { flexDirection: 'column' },
 
   // ── STRIP — compact for attendee screen ──
   attendeeStrip: { width: scale(80), backgroundColor: '#0D0D2B', paddingVertical: 6 },
+  attendeeStripHorizontal: { width: '100%', height: scale(92), paddingVertical: 0, paddingHorizontal: 6 },
   stripContent: { alignItems: 'center', gap: 8, paddingBottom: 8 },
+  stripContentHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   stripCell: { width: scale(68), alignItems: 'center', gap: 3 },
   stripVideoWrap: {
     width: scale(68), height: scale(54),
@@ -1190,7 +1201,9 @@ function useAttendeeSessionStyles(scale) {
   signalBadge: { position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(91,46,255,0.8)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, left: '10%' },
   signalBadgeText: { color: colors.white, fontSize: 12, fontWeight: '600' },
   toolbarScroll: { width: scale(62), backgroundColor: '#0D0D2B' },
+  toolbarScrollHorizontal: { width: '100%', height: scale(80) },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
+  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
   toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnMuted: { backgroundColor: 'rgba(255,59,59,0.2)' },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },

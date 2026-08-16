@@ -83,7 +83,6 @@ export default function LobbyScreen({ navigation, route }) {
   const [seconds, setSeconds] = useState(() => getSharedSeconds(session?.created_at));
   const [isHost, setIsHost] = useState(false);
   const [attendees, setAttendees] = useState([]);
-  const [waitlistCount, setWaitlistCount] = useState(0);
   const [starting, setStarting] = useState(false);
   const [showMusicPanel, setShowMusicPanel] = useState(false);
   const [playingTrackId, setPlayingTrackId] = useState(null);
@@ -125,15 +124,12 @@ export default function LobbyScreen({ navigation, route }) {
     // is the actual fix.
     const cleanupSessionListener = setupSessionListener();
     const cleanupWaitlistListener = setupWaitlistListener();
-    const cleanupWaitlistCountListener = setupWaitlistCountListener();
-    loadWaitlistCount();
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (enteringTimeoutRef.current) clearTimeout(enteringTimeoutRef.current);
       stopMusic();
       cleanupSessionListener?.();
       cleanupWaitlistListener?.();
-      cleanupWaitlistCountListener?.();
     };
   }, []);
 
@@ -215,44 +211,10 @@ export default function LobbyScreen({ navigation, route }) {
           .maybeSingle();
 
         if (!existing) {
-          // Capacity check — this used to be missing entirely, so
-          // max_attendees was purely cosmetic (a progress bar with no
-          // enforcement behind it). This client-side check is the fast
-          // path for the common case; enforce_session_capacity (see the
-          // capacity migration) is the real backstop against two people
-          // joining in the same instant and both passing this check
-          // before either insert lands — that race can't be closed from
-          // the client alone.
-          const cap = session?.max_attendees;
-          if (cap) {
-            const { count } = await supabase
-              .from('session_attendees')
-              .select('id', { count: 'exact', head: true })
-              .eq('session_id', session.id)
-              .is('left_at', null);
-
-            if ((count || 0) >= cap) {
-              navigation.replace('SessionFull', { session });
-              return;
-            }
-          }
-
-          const { error: joinError } = await supabase.from('session_attendees').insert({
+          await supabase.from('session_attendees').insert({
             session_id: session.id,
             user_id: user.id,
           });
-
-          // Covers the race the client-side check above can't close, and
-          // any future case where the trigger's reason changes — checking
-          // the message rather than a specific error code keeps this
-          // working even if the trigger's exact SQLSTATE isn't 'P0001'.
-          if (joinError) {
-            if (joinError.message?.toLowerCase().includes('full')) {
-              navigation.replace('SessionFull', { session });
-              return;
-            }
-            console.log('session_attendees insert error:', joinError.message);
-          }
         }
       }
 
@@ -301,30 +263,6 @@ export default function LobbyScreen({ navigation, route }) {
         .is('left_at', null);
       setAttendees(data || []);
     } catch (e) {}
-  };
-
-  const loadWaitlistCount = async () => {
-    if (!session?.id) return;
-    const { data } = await supabase.rpc('get_waitlist_count', { p_session_id: session.id });
-    setWaitlistCount(data ?? 0);
-  };
-
-  // Separate from setupWaitlistListener below (which, despite its name,
-  // just refreshes the attendee list on session_attendees changes) —
-  // this tracks the actual session_waitlist table live, so the "N
-  // waiting" badge in Host Controls doesn't need a manual refresh to
-  // reflect someone joining, leaving, or getting auto-promoted.
-  const setupWaitlistCountListener = () => {
-    if (!session?.id) return;
-    const ch = supabase
-      .channel(`waitlist-count-${session.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'session_waitlist', filter: `session_id=eq.${session.id}` },
-        () => loadWaitlistCount()
-      )
-      .subscribe();
-    return () => supabase.removeChannel(ch);
   };
 
   const setupWaitlistListener = () => {
@@ -695,20 +633,6 @@ export default function LobbyScreen({ navigation, route }) {
                 </View>
               </View>
 
-              {waitlistCount > 0 && (
-                <TouchableOpacity
-                  style={styles.waitlistBadgeRow}
-                  onPress={() => navigation.navigate('Waitlist', { session })}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="hourglass-outline" size={15} color={palette.primary} />
-                  <Text style={styles.waitlistBadgeText}>
-                    {waitlistCount} {waitlistCount === 1 ? 'person' : 'people'} waiting
-                  </Text>
-                  <Ionicons name="chevron-forward" size={15} color={palette.neutralText} />
-                </TouchableOpacity>
-              )}
-
               <TouchableOpacity
                 style={styles.musicToggle}
                 onPress={() => setShowMusicPanel(!showMusicPanel)}
@@ -995,11 +919,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   capacityFill: { height: 6, backgroundColor: palette.primary, borderRadius: 3 },
-  waitlistBadgeRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: palette.primarySoft,
-    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginTop: 10,
-  },
-  waitlistBadgeText: { flex: 1, fontSize: 12.5, color: palette.ink, fontWeight: '700' },
   musicToggle: {
     flexDirection: 'row',
     alignItems: 'center',
