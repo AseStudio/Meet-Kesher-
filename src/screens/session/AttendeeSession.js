@@ -525,7 +525,11 @@ export default function AttendeeSession({ navigation, route }) {
   };
 
   const leaveAgoraOnly = async () => {
-    await agoraSessionRef.current?.leave();
+    try {
+      await agoraSessionRef.current?.leave();
+    } catch (e) {
+      console.log('Agora leave error (non-fatal):', e.message);
+    }
     agoraSessionRef.current = null;
   };
 
@@ -551,10 +555,15 @@ export default function AttendeeSession({ navigation, route }) {
       {
         text: 'Leave',
         style: 'destructive',
-        onPress: async () => {
-          await leaveAgoraOnly();
-          navigation.navigate('AttendeeDashboard');
-        },
+        // Used to duplicate leaveSession's logic here with none of its
+        // safety — a bare `await leaveAgoraOnly()` with no try/catch,
+        // so the same Agora-throws-and-kills-the-handler bug fixed in
+        // SessionMain's endSession() was quietly sitting here too,
+        // just for the attendee's own "Leave" button instead of the
+        // host's "End session" one. Reusing leaveSession(false) instead
+        // of a second copy means there's exactly one leave path to keep
+        // safe, not two that can drift out of sync.
+        onPress: () => leaveSession(false),
       },
     ]);
   };

@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert,
   ScrollView, Modal
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
-import { createAgoraSession } from '../../services/agora/AgoraService';
-import { AGORA_APP_ID } from '../../lib/constants';
+import { AGORA_APP_ID, createClient, createLocalTracks } from '../../lib/agora';
 import VideoTile from '../../components/VideoTile';
 import WhiteboardCanvas from '../../components/WhiteboardCanvas'; // adjust path if these live elsewhere
 import GraphBoardCanvas from '../../components/GraphboardCanvas';
 import NotificationToastStack from '../../components/NotificationToast';
-import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON } from '../../lib/iconMeta';
-import { useResponsive } from '../../lib/responsive';
 
+const MODE_EMOJIS = { classroom: '🏫', interview: '💼', meeting: '🤝', gettogether: '🎉' };
 const REACTIONS = ['👍', '👏', '❤️', '😂', '🔥', '😮'];
 
 // How long someone must be speaking before we switch to them (ms)
@@ -24,15 +21,6 @@ const VOLUME_THRESHOLD = 10;
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
-  const { scale, isTablet, isDesktop, width, height } = useResponsive();
-  // On a phone held upright, a persistent side column (attendee strip)
-  // plus a persistent side toolbar leave very little width for the
-  // actual speaker video — that's the "half covered" bug. Below the
-  // tablet breakpoint, in portrait, stack everything vertically instead
-  // (strip on top, toolbar on bottom, video gets full width) so it
-  // adapts live when the device rotates, not just at load time.
-  const isPortraitPhone = !isTablet && height > width;
-  const styles = useSessionMainStyles(scale);
 
   // Video states
   const [muted, setMuted] = useState(false);
@@ -45,6 +33,12 @@ export default function SessionMain({ navigation, route }) {
   const [myUid, setMyUid] = useState(null);
   const [joined, setJoined] = useState(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
+  const VIDEO_PROFILES = {
+  ultra:  { width: 1920, height: 1080, frameRate: 30, bitrate: 3000 }, // 1080p
+  high:   { width: 1280, height: 720,  frameRate: 24, bitrate: 1500 }, // 720p
+  medium: { width: 640,  height: 360,  frameRate: 15, bitrate: 600  }, // 360p
+  low:    { width: 320,  height: 180,  frameRate: 15, bitrate: 200  }, // 180p
+};
 
 function getProfileKey(uplink = 0, downlink = 0) {
   const q = Math.max(uplink, downlink);
@@ -145,28 +139,12 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const [pollNotice, setPollNotice] = useState(false);
 
   // Refs
-  const agoraSessionRef = useRef(null);
+  const clientRef = useRef(null);
+  const localAudioRef = useRef(null);
+  const localVideoRef = useRef(null);
   const myUidRef = useRef(null);
   const speakerSwitchTimeoutRef = useRef(null);
   const controlChannelRef = useRef(null);
-  // True while ChatPanel / PollScreen is the currently-open screen. Set
-  // right before navigating there (openChat/openPoll below), cleared
-  // whenever this screen regains focus (meaning whatever was pushed on
-  // top just closed — see the focus-listener effect below). Without
-  // this, session-messages-watch / session-polls-watch (further down)
-  // kept firing their toast + badge-increment even while the person was
-  // ALREADY looking at the live message/poll inside that screen —
-  // SessionMain never unmounts underneath a pushed screen, so those
-  // watcher effects just kept running in the background regardless.
-  const chatOpenRef = useRef(false);
-  const pollOpenRef = useRef(false);
-  useEffect(() => {
-    const unsub = navigation.addListener('focus', () => {
-      chatOpenRef.current = false;
-      pollOpenRef.current = false;
-    });
-    return unsub;
-  }, [navigation]);
   const [uidToUser, setUidToUser] = useState({});
   // Mirror uidToUser into a ref so realtime callbacks (set up once on mount)
   // always read the latest map instead of the stale one captured at mount time.
@@ -200,13 +178,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // could be confirmed "in the session" (present in remoteUsers / chat
   // roster) while never actually appearing on the host's screen anywhere.
   const [attendeeMediaState, setAttendeeMediaState] = useState({});
-  // uid -> { name, signal }, for attendees currently signaling the host
-  // (raise hand / point of correction / want to speak). Populated from
-  // 'attendee-signal' broadcasts — AttendeeSession.js's signal buttons
-  // previously only ever set LOCAL state on the attendee's own screen
-  // ("Signal sent"), with no broadcast at all, so the host never
-  // actually learned about it. This is the host-side half of that fix.
-  const [attendeeSignals, setAttendeeSignals] = useState({});
 
   // Session timer
   useEffect(() => {
@@ -226,23 +197,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
     const interval = setInterval(beat, 15000);
     return () => clearInterval(interval);
   }, [session?.id]);
-
-  // Report the HOST's own mic/camera state, same as AttendeeSession.js
-  // already does for every attendee. This was missing entirely — nothing
-  // here ever told attendees the host's real camera state, and
-  // AttendeeSession.js had no listener for it either (see that file's
-  // matching fix). Without this, attendees had zero way to distinguish
-  // "host's camera is off" from "host's video just hasn't loaded yet",
-  // and every remote VideoTile call on the attendee side either omitted
-  // cameraOff entirely or derived it from unrelated layout logic.
-  useEffect(() => {
-    if (!joined) return;
-    controlChannelRef.current?.send({
-      type: 'broadcast',
-      event: 'media-state',
-      payload: { uid: myUidRef.current, muted, cameraOff },
-    });
-  }, [muted, cameraOff, joined]);
 
   useEffect(() => {
     initAgora();
@@ -274,7 +228,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
         const msg = payload.new;
         const myId = hostUserRef.current?.id;
         if (!myId || msg.sender_id === myId) return; // my own message
-        if (chatOpenRef.current) return; // already visible live inside ChatPanel — no redundant toast/badge
         // DMs to someone else shouldn't reach us at all — the RLS policy
         // on session_messages already enforces that server-side — but
         // check anyway rather than trusting that alone.
@@ -308,7 +261,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
       }, (payload) => {
         const p = payload.new;
         if (p.created_by === hostUserRef.current?.id) return; // I launched it myself
-        if (pollOpenRef.current) return; // already visible live inside PollScreen — no redundant toast/badge
         pushToast(`📊 New poll: ${p.question}`);
         setPollNotice(true);
       })
@@ -428,27 +380,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
           [payload.uid]: { muted: !!payload.muted, cameraOff: !!payload.cameraOff },
         }));
       })
-      // Raise hand / point of correction / want to speak — see
-      // attendeeSignals state comment above for why this listener needed
-      // to exist at all. A falsy payload.signal means the attendee (or
-      // the host, via clearAttendeeSignal below) cleared it.
-      .on('broadcast', { event: 'attendee-signal' }, ({ payload }) => {
-        if (payload.signal) {
-          setAttendeeSignals(prev => ({ ...prev, [payload.uid]: { name: payload.name, signal: payload.signal } }));
-          const label = payload.signal === 'hand' ? 'raised their hand'
-            : payload.signal === 'correction' ? 'has a point of correction'
-            : 'wants to speak';
-          const emoji = payload.signal === 'hand' ? '✋' : payload.signal === 'correction' ? '🔴' : '🗣️';
-          pushToast(`${emoji} ${payload.name} ${label}`);
-        } else {
-          setAttendeeSignals(prev => {
-            if (!prev[payload.uid]) return prev;
-            const next = { ...prev };
-            delete next[payload.uid];
-            return next;
-          });
-        }
-      })
       // A co-host's client sends requests here instead of performing
       // privileged actions itself — see the coHosts state comment for
       // why. handleCohostActionRequest is defined further down (it needs
@@ -492,48 +423,65 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
  const initAgora = async () => {
   try {
+    const client = createClient();
+    clientRef.current = client;
+
     let currentProfile = 'ultra';
 
     const applyVideoProfile = async (key) => {
-      if (currentProfile === key) return;
+      if (!localVideoRef.current || currentProfile === key) return;
       currentProfile = key;
-      await agoraSessionRef.current?.setVideoQuality(key);
-      console.log('📹 Host video quality →', key);
+      try {
+        await localVideoRef.current.setEncoderConfiguration(VIDEO_PROFILES[key]);
+        console.log('📹 Host video quality →', key);
+      } catch (e) {
+        console.log('Could not set video profile:', e.message);
+      }
     };
 
-    const agoraSession = createAgoraSession({
-      onUserPublished: (uid, mediaType) => {
-        console.log('🎥 Host sees remote user:', uid, mediaType);
+    client.on('user-published', async (user, mediaType) => {
+      console.log('🎥 Host sees remote user:', user.uid, mediaType);
+      try {
+        await client.subscribe(user, mediaType);
+
         setRemoteUsers(prev => {
-          const videoTrack = agoraSession.getRemoteVideoRef(uid);
-          const exists = prev.find(u => u.uid === uid);
-          if (exists) return prev.map(u => (u.uid === uid ? { ...u, uid, videoTrack } : u));
-          return [...prev, { uid, videoTrack }];
+          const exists = prev.find(u => u.uid === user.uid);
+          if (exists) return prev.map(u => (u.uid === user.uid ? user : u));
+          return [...prev, user];
         });
-      },
-      onUserUnpublished: (uid, mediaType) => {
-        if (mediaType === 'video') {
-          setRemoteUsers(prev =>
-            prev.map(u => (u.uid === uid ? { ...u, videoTrack: null } : u))
-          );
+
+        if (mediaType === 'audio') {
+          user.audioTrack?.play();
         }
-      },
-      onUserLeft: (uid) => {
-        console.log('User left:', uid);
-        setRemoteUsers(prev => prev.filter(u => u.uid !== uid));
-        setActiveSpeakerUid(prev => (prev === uid ? null : prev));
-        clearAttendeeFromAllState(uid);
-      },
-      onVolumeIndicator: handleVolumeIndicator,
-      onNetworkQuality: (stats) => {
-        const key = getProfileKey(
-          stats.uplinkNetworkQuality,
-          stats.downlinkNetworkQuality
-        );
-        applyVideoProfile(key);
-      },
+      } catch (err) {
+        console.error('Subscribe error:', err);
+      }
     });
-    agoraSessionRef.current = agoraSession;
+
+    client.on('user-unpublished', (user, mediaType) => {
+      if (mediaType === 'video') {
+        setRemoteUsers(prev =>
+          prev.map(u => (u.uid === user.uid ? { ...u, videoTrack: null } : u))
+        );
+      }
+    });
+
+    client.on('user-left', (user) => {
+      console.log('User left:', user.uid);
+      setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
+      setActiveSpeakerUid(prev => (prev === user.uid ? null : prev));
+      clearAttendeeFromAllState(user.uid);
+    });
+
+    client.on('volume-indicator', handleVolumeIndicator);
+
+    client.on('network-quality', (stats) => {
+      const key = getProfileKey(
+        stats.uplinkNetworkQuality,
+        stats.downlinkNetworkQuality
+      );
+      applyVideoProfile(key);
+    });
 
     let token = null;
     if (session?.code) {
@@ -550,23 +498,32 @@ function getProfileKey(uplink = 0, downlink = 0) {
       }
     }
 
-    const assignedUid = await agoraSession.join(
-      AGORA_APP_ID,
-      session?.code || 'default',
-      token,
-      null
-    );
+    await client.join(AGORA_APP_ID, session?.code || 'default', token, null);
+
+    const assignedUid = client.uid;
     myUidRef.current = assignedUid;
     setMyUid(assignedUid);
     console.log('✅ Host joined. My Agora UID:', assignedUid);
 
-    setLocalVideoTrack(agoraSession.getLocalVideoRef());
+    client.enableAudioVolumeIndicator();
 
-    // Host always starts live on both tracks (unlike attendees, which
-    // wait for an explicit toggle) — so publish immediately based on
-    // the initial muted/cameraOff state.
-    if (!muted) await agoraSession.publishAudio();
-    if (!cameraOff) await agoraSession.publishVideo();
+    const [audioTrack, videoTrack] = await createLocalTracks(!cameraOff, !muted);
+    localAudioRef.current = audioTrack;
+    localVideoRef.current = videoTrack;
+    setLocalVideoTrack(videoTrack);
+
+    // Start at 1080p
+    if (videoTrack) {
+      try {
+        await videoTrack.setEncoderConfiguration(VIDEO_PROFILES.ultra);
+      } catch (e) {}
+    }
+
+    const tracksToPublish = [audioTrack, videoTrack].filter(Boolean);
+    if (tracksToPublish.length > 0) {
+      await client.publish(tracksToPublish);
+      console.log('✅ Host published tracks:', tracksToPublish.length);
+    }
 
     setJoined(true);
   } catch (err) {
@@ -576,20 +533,28 @@ function getProfileKey(uplink = 0, downlink = 0) {
 };
 
   const leaveAgora = async () => {
-    await agoraSessionRef.current?.leave();
-    agoraSessionRef.current = null;
+    try {
+      if (clientRef.current) {
+        await clientRef.current.leave();
+        clientRef.current.removeAllListeners();
+        clientRef.current = null;
+      }
+      localAudioRef.current?.close();
+      localVideoRef.current?.close();
+    } catch (e) {}
   };
 
   const toggleMic = async () => {
     try {
-      await agoraSessionRef.current?.setAudioEnabled(muted);
+      await localAudioRef.current?.setEnabled(muted);
       setMuted(!muted);
     } catch (e) { console.log('Mic error:', e.message); }
   };
 
   const toggleCamera = async () => {
     try {
-      await agoraSessionRef.current?.setVideoEnabled(cameraOff);
+      if (!localVideoRef.current) return;
+      await localVideoRef.current.setEnabled(cameraOff);
       setCameraOff(prev => !prev);
     } catch (e) { console.log('Camera error:', e.message); }
   };
@@ -770,29 +735,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
       delete next[targetUid];
       return next;
     });
-    setAttendeeSignals(prev => {
-      if (!prev[targetUid]) return prev;
-      const next = { ...prev };
-      delete next[targetUid];
-      return next;
-    });
-  };
-
-  // Host "acknowledging"/dismissing a raised hand etc — clears it for
-  // everyone (broadcast), not just locally, and tells the attendee's own
-  // client to drop its "Signal sent" badge too so both sides agree it's
-  // been addressed.
-  const clearAttendeeSignal = (targetUid) => {
-    setAttendeeSignals(prev => {
-      const next = { ...prev };
-      delete next[targetUid];
-      return next;
-    });
-    controlChannelRef.current?.send({
-      type: 'broadcast',
-      event: 'host-clear-signal',
-      payload: { uid: targetUid },
-    });
   };
 
   // ─── CO-HOST GRANT / REVOKE — host-only, deliberately not relayable ───
@@ -869,14 +811,30 @@ function getProfileKey(uplink = 0, downlink = 0) {
   };
 
   const endSession = () => {
+    // window.confirm() doesn't exist on native — this is the SAME
+    // browser-only-API bug fixed earlier for window.confirm() in
+    // LobbyScreen.js/AttendeeSession.js, just missed in this file back
+    // then. On web this "worked" because window IS defined there; on a
+    // real native build tapping "End" threw a ReferenceError on this
+    // function's very first line, before leaveAgora or the status update
+    // ever ran — so nothing visibly happened.
     Alert.alert('End session for everyone?', undefined, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'End session',
         style: 'destructive',
         onPress: async () => {
+          // The status update — the part that actually ends the session
+          // for everyone — is checked before treating this as done.
+          // leaveAgora() below is already wrapped in its own try/catch,
+          // so an Agora hiccup can't block it either way, but keeping the
+          // real state change first (and verified) is the safer order.
+          const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
+          if (error) {
+            Alert.alert('Could not end session', error.message);
+            return;
+          }
           await leaveAgora();
-          await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
           navigation.navigate('EndSession', { session });
         },
       },
@@ -958,28 +916,26 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
   const openChat = () => {
     setUnreadCount(0);
-    chatOpenRef.current = true;
     navigation.navigate('ChatPanel', { session, currentUser: hostUser, isHost: true, roster: buildChatRoster() });
   };
 
   const openPoll = () => {
     setPollNotice(false);
-    pollOpenRef.current = true;
     navigation.navigate('PollScreen', { session, currentUser: hostUser, isHost: true });
   };
 
   const tools = [
-    { icon: muted ? 'mic-off-outline' : 'mic-outline', label: 'Mic', action: toggleMic, active: muted },
-    { icon: cameraOff ? 'videocam-off-outline' : 'videocam-outline', label: 'Cam', action: toggleCamera, active: cameraOff },
-    { icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
-    { icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
-    { icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },
-    { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen') },
-    { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
-    { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
-    { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
-    { icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: () => setRecording(!recording), red: true },
-    { icon: 'power-outline', label: 'End', action: endSession, end: true },
+    { icon: muted ? '🔇' : '🎙️', label: 'Mic', action: toggleMic, active: muted },
+    { icon: cameraOff ? '📷' : '📹', label: 'Cam', action: toggleCamera, active: cameraOff },
+    { icon: '📋', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
+    { icon: '🖊️', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
+    { icon: '📊', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },
+    { icon: '⏱️', label: 'Timer', action: () => navigation.navigate('TimerScreen') },
+    { icon: '💬', label: 'Chat', action: openChat, badge: unreadCount },
+    { icon: '😊', label: 'React', action: () => setShowReactions(true) },
+    { icon: '⭐', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
+    { icon: recording ? '⏹️' : '⏺️', label: 'Record', action: () => setRecording(!recording), red: true },
+    { icon: '✖️', label: 'End', action: endSession, end: true },
   ];
 
 
@@ -993,8 +949,9 @@ function getProfileKey(uplink = 0, downlink = 0) {
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
-            <ModeIcon mode={session?.mode} size={11} color={colors.white} />
-            <Text style={styles.modeBadgeText}>{session?.mode || 'Session'}</Text>
+            <Text style={styles.modeBadgeText}>
+              {MODE_EMOJIS[session?.mode] || '📅'} {session?.mode || 'session'}
+            </Text>
           </View>
         </View>
         <View style={styles.topRight}>
@@ -1012,32 +969,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
         </View>
       </View>
 
-      {/* Signals bar — raised hands / corrections / speak requests. Sits
-          above mainContent so it's visible in board mode and video mode
-          alike, not nested inside either branch. Tap a chip to dismiss it
-          for everyone (see clearAttendeeSignal). */}
-      {Object.keys(attendeeSignals).length > 0 && (
-        <View style={styles.signalsBar}>
-          {Object.entries(attendeeSignals).map(([uid, info]) => (
-            <TouchableOpacity key={uid} style={styles.signalChip} onPress={() => clearAttendeeSignal(uid)}>
-              <Ionicons name={SIGNAL_ICON[info.signal] || 'megaphone-outline'} size={13} color={colors.white} />
-              <Text style={styles.signalChipText} numberOfLines={1}>{info.name}</Text>
-              <Ionicons name="close-outline" size={13} color="rgba(255,255,255,0.6)" />
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
+      <View style={styles.mainContent}>
 
         {/* ─── ATTENDEE STRIP — video cells ─── */}
-        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]}>
-          <ScrollView
-            horizontal={isPortraitPhone}
-            showsVerticalScrollIndicator={false}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={isPortraitPhone ? styles.stripContentHorizontal : styles.stripContent}
-          >
+        <View style={styles.attendeeStrip}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
             {remoteUsers.map((user, i) => {
               // This user's track is already playing full-size (speaker
               // view), in the board PiP stack, or in the Gallery grid —
@@ -1066,19 +1002,19 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   {/* Badge when this attendee currently has board edit access */}
                   {boardEditors[user.uid] && (
                     <View style={styles.stripEditingBadge}>
-                      <Ionicons name="create" size={9} color={colors.white} />
+                      <Text style={styles.stripEditingBadgeText}>🖊️</Text>
                     </View>
                   )}
                   {/* Badge when this attendee is a co-host */}
                   {coHosts[user.uid] && (
                     <View style={styles.stripCoHostBadge}>
-                      <Ionicons name="star" size={9} color="#3A2900" />
+                      <Text style={styles.stripCoHostBadgeText}>⭐</Text>
                     </View>
                   )}
                   {/* Badge when this attendee is currently muted */}
                   {attendeeMediaState[user.uid]?.muted && (
                     <View style={styles.stripMutedBadge}>
-                      <Ionicons name="mic-off" size={9} color={colors.white} />
+                      <Text style={styles.stripMutedBadgeText}>🔇</Text>
                     </View>
                   )}
                   {/* 3-dot menu */}
@@ -1170,8 +1106,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
               <View style={[styles.boardEditorsBar, { pointerEvents: 'box-none' }]}>
                 {Object.entries(boardEditors).map(([uid, info]) => (
                   <View key={uid} style={styles.boardEditorChip}>
-                    <Ionicons name="create" size={11} color={colors.white} />
-                    <Text style={styles.boardEditorChipText} numberOfLines={1}>{info.name}</Text>
+                    <Text style={styles.boardEditorChipText} numberOfLines={1}>🖊️ {info.name}</Text>
                     <TouchableOpacity onPress={() => revokeFromBoard(uid)} style={styles.boardEditorRemoveBtn}>
                       <Text style={styles.boardEditorRemoveText}>Uncall</Text>
                     </TouchableOpacity>
@@ -1188,9 +1123,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   style={[styles.interruptBtn, hostInterrupting && styles.interruptBtnActive]}
                   onPress={toggleInterrupt}
                 >
-                  <Ionicons name={hostInterrupting ? 'pause-outline' : 'hand-left-outline'} size={13} color={colors.white} />
                   <Text style={styles.interruptBtnText}>
-                    {hostInterrupting ? 'Uninterrupt' : 'Interrupt'}
+                    {hostInterrupting ? '⏸ Uninterrupt' : '✋ Interrupt'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1209,7 +1143,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     track={localVideoTrack}
                     cameraOff={cameraOff}
                     initials="You"
-                    label="You (Host)"
+                    label={iAmSpeaking ? '🎙️ You (Host)' : 'You (Host)'}
                     style={{ flex: 1 }}
                     initialsSize={22}
                     mirror={true}
@@ -1227,14 +1161,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
                       track={user.videoTrack}
                       cameraOff={!!attendeeMediaState[user.uid]?.cameraOff}
                       initials={`U${i + 1}`}
-                      label={`User ${i + 1}`}
+                      label={activeSpeakerUid === user.uid ? `🎙️ User ${i + 1}` : `User ${i + 1}`}
                       style={{ flex: 1 }}
                       initialsSize={22}
                     />
                     {coHosts[user.uid] && (
                       <View style={styles.galleryCoHostBadge}>
-                        <Ionicons name="star" size={10} color="#3A2900" />
-                        <Text style={styles.galleryCoHostBadgeText}>Co-host</Text>
+                        <Text style={styles.galleryCoHostBadgeText}>⭐ Co-host</Text>
                       </View>
                     )}
                     <TouchableOpacity style={styles.galleryCellDots} onPress={() => setShowDropdown(user.uid)}>
@@ -1257,14 +1190,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
                       track={localVideoTrack}
                       cameraOff={cameraOff}
                       initials="You"
-                      label="You (Host)"
+                      label={iAmSpeaking ? '🎙️ You (Host)' : 'You (Host)'}
                       style={{ flex: 1 }}
                       initialsSize={40}
                       mirror={true}
                     />
                   ) : (
                     <View style={styles.noVideoPlaceholder}>
-                      <Ionicons name="people-outline" size={44} color="rgba(255,255,255,0.35)" />
+                      <Text style={styles.noVideoIcon}>👥</Text>
                       <Text style={styles.noVideoText}>
                         {joined ? 'Waiting for attendees...' : 'Connecting...'}
                       </Text>
@@ -1276,7 +1209,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     track={mainRemoteUser?.videoTrack}
                     cameraOff={!!attendeeMediaState[mainRemoteUser?.uid]?.cameraOff}
                     initials={`U${remoteUsers.indexOf(mainRemoteUser) + 1}`}
-                    label={`User ${remoteUsers.indexOf(mainRemoteUser) + 1}`}
+                    label={`🎙️ User ${remoteUsers.indexOf(mainRemoteUser) + 1}`}
                     style={{ flex: 1 }}
                     initialsSize={40}
                   />
@@ -1312,20 +1245,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
         )}
 
         {/* Toolbar */}
-        <ScrollView
-          horizontal={isPortraitPhone}
-          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
-          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
-          showsVerticalScrollIndicator={false}
-          showsHorizontalScrollIndicator={false}
-        >
+        <ScrollView style={styles.toolbarScroll} contentContainerStyle={styles.toolbar} showsVerticalScrollIndicator={false}>
           {tools.map((tool, i) => (
             <TouchableOpacity
               key={i}
               style={[styles.toolBtn, tool.active && styles.toolBtnActive, tool.red && styles.toolBtnRed, tool.end && styles.toolBtnEnd]}
               onPress={tool.action}
             >
-              <Ionicons name={tool.icon} size={18} color={colors.white} />
+              <Text style={styles.toolIcon}>{tool.icon}</Text>
               <Text style={styles.toolLabel}>{tool.label}</Text>
               {!!tool.badge && (
                 <View style={styles.toolBadge}>
@@ -1343,19 +1270,19 @@ function getProfileKey(uplink = 0, downlink = 0) {
           <View style={styles.boardPickerPanel}>
             <Text style={styles.boardPickerTitle}>
               {boardPickerTargetUid
-                ? `Choose a Board to Call ${uidToUser[boardPickerTargetUid]?.name || 'them'} To`
-                : 'Choose a Board'}
+                ? `🖊️ Choose a Board to Call ${uidToUser[boardPickerTargetUid]?.name || 'them'} To`
+                : '🖊️ Choose a Board'}
             </Text>
             <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.whiteboard} size={26} color={colors.white} />
+              <Text style={styles.boardPickerEmoji}>⬜</Text>
               <View><Text style={styles.boardPickerName}>Whiteboard</Text><Text style={styles.boardPickerDesc}>Clean white canvas with color pens</Text></View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('blackboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.blackboard} size={26} color={colors.white} />
+              <Text style={styles.boardPickerEmoji}>🟫</Text>
               <View><Text style={styles.boardPickerName}>Blackboard</Text><Text style={styles.boardPickerDesc}>Classic chalkboard with chalk colors</Text></View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('graph')}>
-              <Ionicons name={BOARD_TYPE_ICON.graph} size={26} color={colors.white} />
+              <Text style={styles.boardPickerEmoji}>📊</Text>
               <View><Text style={styles.boardPickerName}>Graph Board</Text><Text style={styles.boardPickerDesc}>Plot equations, XY values and charts</Text></View>
             </TouchableOpacity>
           </View>
@@ -1385,10 +1312,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
       <Modal visible={showCoHostManager} transparent animationType="fade" onRequestClose={() => setShowCoHostManager(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCoHostManager(false)}>
           <TouchableOpacity activeOpacity={1} style={styles.coHostPanel} onPress={() => {}}>
-            <View style={styles.coHostPanelTitleRow}>
-              <Ionicons name="star" size={16} color="#FFC107" />
-              <Text style={styles.coHostPanelTitle}>Co-Hosts</Text>
-            </View>
+            <Text style={styles.coHostPanelTitle}>⭐ Co-Hosts</Text>
             <Text style={styles.coHostPanelDesc}>
               Co-hosts can mute or camera-off an attendee, call someone to the board, and remove attendees from the session. They can't ban, end the session, control recording, or manage other co-hosts.
             </Text>
@@ -1412,9 +1336,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                         style={[styles.coHostToggle, isCo && styles.coHostToggleActive]}
                         onPress={() => (isCo ? revokeCoHost(user.uid) : grantCoHost(user.uid))}
                       >
-                        {isCo && <Ionicons name="checkmark" size={12} color={colors.white} />}
                         <Text style={[styles.coHostToggleText, isCo && styles.coHostToggleTextActive]}>
-                          {isCo ? 'Co-host' : 'Make Co-host'}
+                          {isCo ? '✓ Co-host' : 'Make Co-host'}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -1437,100 +1360,99 @@ function getProfileKey(uplink = 0, downlink = 0) {
               User {remoteUsers.findIndex(u => u.uid === showDropdown) + 1}
             </Text>
             {[
-              { icon: 'mic-off-outline', label: 'Mute', color: colors.white, action: () => requestMuteAttendee(showDropdown) },
-              { icon: 'videocam-off-outline', label: 'Turn off camera', color: colors.white, action: () => requestCameraOffAttendee(showDropdown) },
+              { icon: '🔇', label: 'Mute', color: colors.white, action: () => requestMuteAttendee(showDropdown) },
+              { icon: '📷', label: 'Turn off camera', color: colors.white, action: () => requestCameraOffAttendee(showDropdown) },
               coHosts[showDropdown]
-                ? { icon: 'star', label: 'Revoke Co-host', color: colors.red, action: () => revokeCoHost(showDropdown) }
-                : { icon: 'star-outline', label: 'Make Co-host', color: colors.white, action: () => grantCoHost(showDropdown) },
+                ? { icon: '⭐', label: 'Revoke Co-host', color: colors.red, action: () => revokeCoHost(showDropdown) }
+                : { icon: '⭐', label: 'Make Co-host', color: colors.white, action: () => grantCoHost(showDropdown) },
               boardEditors[showDropdown]
-                ? { icon: 'arrow-down-circle-outline', label: 'Uncall from Board', color: colors.red, action: () => revokeFromBoard(showDropdown) }
+                ? { icon: '⬇️', label: 'Uncall from Board', color: colors.red, action: () => revokeFromBoard(showDropdown) }
                 : pendingCallUid === showDropdown
-                  ? { icon: 'hourglass-outline', label: 'Calling…', color: 'rgba(255,255,255,0.4)', action: () => {} }
-                  : { icon: 'create-outline', label: 'Call to Board', color: colors.white, action: () => startCallToBoard(showDropdown) },
-              { icon: 'chatbubble-outline', label: 'Direct Message', color: colors.white, action: () => {
-                chatOpenRef.current = true;
-                navigation.navigate('ChatPanel', {
-                  session,
-                  currentUser: hostUser,
-                  isHost: true,
-                  roster: buildChatRoster(),
-                  prefilledRecipient: uidToUser[showDropdown]
-                    ? { userId: uidToUser[showDropdown].userId, name: uidToUser[showDropdown].name }
-                    : null,
-                });
+                  ? { icon: '⏳', label: 'Calling…', color: 'rgba(255,255,255,0.4)', action: () => {} }
+                  : { icon: '🖊️', label: 'Call to Board', color: colors.white, action: () => startCallToBoard(showDropdown) },
+              { icon: '💬', label: 'Direct Message', color: colors.white, action: () => navigation.navigate('ChatPanel', {
+                session,
+                currentUser: hostUser,
+                isHost: true,
+                roster: buildChatRoster(),
+                prefilledRecipient: uidToUser[showDropdown]
+                  ? { userId: uidToUser[showDropdown].userId, name: uidToUser[showDropdown].name }
+                  : null,
+              }) },
+              // window.confirm() → Alert.alert, same reasoning as
+              // endSession above — this action was a no-op on native.
+              { icon: '⬅️', label: 'Remove from Session', color: colors.red, action: () => {
+                const userInfo = uidToUser[showDropdown];
+                Alert.alert(
+                  'Remove from session?',
+                  `Remove ${userInfo?.name || 'this user'} from the session?`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Remove', style: 'destructive', onPress: () => removeAttendeeFromSession(showDropdown) },
+                  ]
+                );
               } },
-             { icon: 'person-remove-outline', label: 'Remove from Session', color: colors.red, action: () => {
-  const userInfo = uidToUser[showDropdown];
-  const targetUid = showDropdown;
-  Alert.alert(
-    `Remove ${userInfo?.name || 'this user'} from the session?`,
-    undefined,
-    [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => removeAttendeeFromSession(targetUid) },
-    ]
-  );
-}},
-              { icon: 'ban-outline', label: 'Ban', color: colors.red, action: () => {
-  const userInfo = uidToUser[showDropdown];
-  const targetUid = showDropdown;
-  if (!userInfo) {
-    Alert.alert('Cannot ban user', 'Cannot identify this user yet. Try again in a moment.');
-    return;
-  }
-  Alert.alert(
-    `Ban ${userInfo.name} from all your sessions?`,
-    undefined,
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Ban',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const { data: { user: hostUserAuth } } = await supabase.auth.getUser();
+              // Same fix here — this used BOTH window.confirm() AND bare
+              // alert() (three separate call sites inside), all
+              // browser-only and all no-ops on native.
+              { icon: '🔴', label: 'Ban', color: colors.red, action: () => {
+                const userInfo = uidToUser[showDropdown];
+                if (!userInfo) {
+                  Alert.alert('Cannot identify this user yet', 'Try again in a moment.');
+                  return;
+                }
+                Alert.alert(
+                  'Ban this user?',
+                  `Ban ${userInfo.name} from all your sessions?`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Ban',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const { data: { user: hostUserAuth } } = await supabase.auth.getUser();
 
-            await supabase.from('bans').insert({
-              host_id: hostUserAuth.id,
-              banned_user_id: userInfo.userId,
-              session_id: session.id,
-              reason: 'Banned by host during session',
-            });
+                          await supabase.from('bans').insert({
+                            host_id: hostUserAuth.id,
+                            banned_user_id: userInfo.userId,
+                            session_id: session.id,
+                            reason: 'Banned by host during session',
+                          });
 
-            await supabase.from('session_attendees')
-              .update({ left_at: new Date().toISOString() })
-              .eq('session_id', session.id)
-              .eq('user_id', userInfo.userId);
+                          await supabase.from('session_attendees')
+                            .update({ left_at: new Date().toISOString() })
+                            .eq('session_id', session.id)
+                            .eq('user_id', userInfo.userId);
 
-            controlChannelRef.current?.send({
-              type: 'broadcast',
-              event: 'user-banned',
-              payload: { userId: userInfo.userId },
-            });
+                          controlChannelRef.current?.send({
+                            type: 'broadcast',
+                            event: 'user-banned',
+                            payload: { userId: userInfo.userId },
+                          });
 
-            setRemoteUsers(prev => prev.filter(u => u.uid !== targetUid));
-            clearAttendeeFromAllState(targetUid);
-            if (coHosts[targetUid]) {
-              controlChannelRef.current?.send({ type: 'broadcast', event: 'co-host-revoked', payload: { uid: targetUid } });
-            }
-            Alert.alert('Banned', `${userInfo.name} has been banned.`);
-          } catch (e) {
-            Alert.alert('Failed to ban', e.message);
-          }
-        },
-      },
-    ]
-  );
-}},
+                          setRemoteUsers(prev => prev.filter(u => u.uid !== showDropdown));
+                          clearAttendeeFromAllState(showDropdown);
+                          if (coHosts[showDropdown]) {
+                            controlChannelRef.current?.send({ type: 'broadcast', event: 'co-host-revoked', payload: { uid: showDropdown } });
+                          }
+                          Alert.alert('Banned', `${userInfo.name} has been banned.`);
+                        } catch (e) {
+                          Alert.alert('Failed to ban', e.message);
+                        }
+                      },
+                    },
+                  ]
+                );
+              } },
             ].map((item, i) => (
               <TouchableOpacity key={i} style={styles.dropdownItem} onPress={() => { item.action(); setShowDropdown(null); }}>
-                <Ionicons name={item.icon} size={16} color={item.color} />
+                <Text style={styles.dropdownIcon}>{item.icon}</Text>
                 <Text style={[styles.dropdownText, { color: item.color }]}>{item.label}</Text>
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={styles.dropdownClose} onPress={() => setShowDropdown(null)}>
-              <Ionicons name="close-outline" size={14} color="rgba(255,255,255,0.6)" />
-              <Text style={styles.dropdownCloseText}>Close</Text>
+              <Text style={styles.dropdownCloseText}>✕ Close</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1547,14 +1469,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
             </View>
           </View>
           <View style={styles.approvalButtons}>
-            <TouchableOpacity style={styles.approveBtn} onPress={() => setShowApproval(false)}>
-              <Ionicons name="checkmark" size={14} color={colors.white} />
-              <Text style={styles.approveBtnText}>Approve</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.declineBtn} onPress={() => setShowApproval(false)}>
-              <Ionicons name="close" size={14} color={colors.white} />
-              <Text style={styles.declineBtnText}>Decline</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.approveBtn} onPress={() => setShowApproval(false)}><Text style={styles.approveBtnText}>✓ Approve</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.declineBtn} onPress={() => setShowApproval(false)}><Text style={styles.declineBtnText}>✕ Decline</Text></TouchableOpacity>
           </View>
         </View>
       )}
@@ -1562,13 +1478,12 @@ function getProfileKey(uplink = 0, downlink = 0) {
   );
 }
 
-function useSessionMainStyles(scale) {
-  return useMemo(() => StyleSheet.create({
+const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A' },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, paddingTop: 20, backgroundColor: '#0D0D2B' },
   sessionTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
-  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 3 },
-  modeBadgeText: { color: colors.white, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
+  modeBadge: { backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginTop: 3 },
+  modeBadgeText: { color: colors.white, fontSize: 10 },
   topRight: { alignItems: 'flex-end', gap: 4 },
   recordingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,59,59,0.2)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
   recordingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.red },
@@ -1577,23 +1492,14 @@ function useSessionMainStyles(scale) {
   liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
   liveText: { color: colors.green, fontSize: 10, fontWeight: '700' },
-  signalsBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#12123A' },
-  signalChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(91,46,255,0.25)', borderWidth: 1, borderColor: 'rgba(91,46,255,0.5)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
-  signalChipText: { color: colors.white, fontSize: 11, fontWeight: '600', flexShrink: 1 },
   mainContent: { flex: 1, flexDirection: 'row' },
-  mainContentPortrait: { flexDirection: 'column' },
 
   // ── ATTENDEE STRIP ──
-  attendeeStrip: { width: scale(104), backgroundColor: '#0D0D2B', paddingVertical: 6 },
-  // Portrait phone: strip becomes a horizontal bar along the top instead
-  // of eating a fixed column's worth of the screen's (already scarce)
-  // width — same cells, same ScrollView, just laid out sideways.
-  attendeeStripHorizontal: { width: '100%', height: scale(108), paddingVertical: 0, paddingHorizontal: 6 },
+  attendeeStrip: { width: 104, backgroundColor: '#0D0D2B', paddingVertical: 6 },
   stripContent: { alignItems: 'center', gap: 10, paddingBottom: 8 },
-  stripContentHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  stripCell: { width: scale(88), alignItems: 'center', gap: 3 },
+  stripCell: { width: 88, alignItems: 'center', gap: 3 },
   stripVideoWrap: {
-    width: scale(88), height: scale(68),
+    width: 88, height: 68,
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1.5,
@@ -1619,21 +1525,23 @@ function useSessionMainStyles(scale) {
     borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
     zIndex: 20,
   },
+  stripEditingBadgeText: { fontSize: 10 },
   stripMutedBadge: {
     position: 'absolute', bottom: 4, left: 4,
     backgroundColor: 'rgba(255,59,59,0.85)',
     borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
     zIndex: 20,
   },
+  stripMutedBadgeText: { fontSize: 10 },
   stripCoHostBadge: {
     position: 'absolute', bottom: 4, right: 4,
     backgroundColor: 'rgba(255,193,7,0.9)',
     borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
     zIndex: 20,
   },
+  stripCoHostBadgeText: { fontSize: 10 },
   galleryCoHostBadge: {
     position: 'absolute', top: 8, left: 8,
-    flexDirection: 'row', alignItems: 'center', gap: 3,
     backgroundColor: 'rgba(255,193,7,0.9)',
     borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
     zIndex: 10,
@@ -1644,10 +1552,11 @@ function useSessionMainStyles(scale) {
   // ── VIDEO MODE ──
   speakerView: { flex: 1, backgroundColor: '#111128', position: 'relative' },
   noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  noVideoIcon: { fontSize: 48 },
   noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
   pipContainer: {
     position: 'absolute', bottom: 60, left: 14,
-    width: scale(92), height: scale(122),
+    width: 92, height: 122,
     borderRadius: 12, overflow: 'hidden',
     borderWidth: 2, borderColor: colors.primary,
   },
@@ -1658,7 +1567,7 @@ function useSessionMainStyles(scale) {
 
   // ── GALLERY ──
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8, alignContent: 'flex-start' },
-  galleryCell: { width: scale(190), height: scale(140), borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
+  galleryCell: { width: 190, height: 140, borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
   galleryCellDots: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, zIndex: 10 },
   galleryCellDotsText: { color: colors.white, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
   galleryCellActive: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 2.5, borderColor: colors.green },
@@ -1669,7 +1578,7 @@ function useSessionMainStyles(scale) {
   // keeps the floating video PiP on top.
   boardMainArea: { flex: 1, position: 'relative', overflow: 'hidden' },
   pipStack: { position: 'absolute', top: 12, left: 12, zIndex: 60, gap: 6 },
-  stackPip: { width: scale(90), height: scale(116), borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
+  stackPip: { width: 90, height: 116, borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
   boardEditorsBar: { position: 'absolute', top: 12, right: 12, zIndex: 60, gap: 6, maxWidth: 200 },
   boardEditorChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 16, paddingLeft: 10, paddingRight: 6, paddingVertical: 5 },
   boardEditorChipText: { color: colors.white, fontSize: 11, fontWeight: '600', maxWidth: 90 },
@@ -1678,23 +1587,19 @@ function useSessionMainStyles(scale) {
   pendingCallBar: { position: 'absolute', top: 12, alignSelf: 'center', zIndex: 61, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
   pendingCallText: { color: colors.white, fontSize: 12, fontWeight: '600' },
   interruptBar: { position: 'absolute', bottom: 14, alignSelf: 'center', zIndex: 60 },
-  interruptBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 20, paddingVertical: 11, borderRadius: 24, borderWidth: 1.5, borderColor: colors.primary },
+  interruptBtn: { backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 20, paddingVertical: 11, borderRadius: 24, borderWidth: 1.5, borderColor: colors.primary },
   interruptBtnActive: { backgroundColor: colors.primary },
   interruptBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
 
   // ── TOOLBAR ──
-  toolbarScroll: { width: scale(62), backgroundColor: '#0D0D2B' },
-  // Portrait phone: toolbar becomes a horizontal bottom bar — same
-  // buttons, same ScrollView, laid out sideways, so speakerView above
-  // it gets the full screen width instead of losing it to a side rail.
-  toolbarScrollHorizontal: { width: '100%', height: scale(80) },
+  toolbarScroll: { width: 62, backgroundColor: '#0D0D2B' },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
-  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
-  toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  toolBtn: { width: 50, height: 50, borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.15)' },
   toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginTop: 4 },
-  toolLabel: { fontSize: scale(7), color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
+  toolIcon: { fontSize: 16 },
+  toolLabel: { fontSize: 7, color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
   toolBadge: {
     position: 'absolute',
     top: 2,
@@ -1711,50 +1616,50 @@ function useSessionMainStyles(scale) {
 
   // ── MODALS ──
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  boardPickerPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: scale(300), maxWidth: '92%', gap: 12, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
+  boardPickerPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: 300, gap: 12, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
   boardPickerTitle: { fontSize: 17, fontWeight: '800', color: colors.white, marginBottom: 4 },
   boardPickerOption: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  boardPickerEmoji: { fontSize: 28 },
   boardPickerName: { fontSize: 15, fontWeight: '700', color: colors.white },
   boardPickerDesc: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
   reactionsPanel: { backgroundColor: '#1E1E3F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 14, position: 'absolute', bottom: 0, left: 0, right: 0 },
   reactionsPanelTitle: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
   reactionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
-  reactionBtn: { width: scale(60), height: scale(60), borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
+  reactionBtn: { width: 60, height: 60, borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
   reactionEmoji: { fontSize: 30 },
-  coHostPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: scale(320), maxWidth: '92%', maxHeight: '75%', gap: 12, borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
-  coHostPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  coHostPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: 320, maxHeight: '75%', gap: 12, borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
   coHostPanelTitle: { fontSize: 17, fontWeight: '800', color: colors.white },
   coHostPanelDesc: { fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 17 },
   coHostEmptyText: { fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 20 },
   coHostList: { maxHeight: 280 },
   coHostRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
   coHostRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 },
-  coHostAvatar: { width: scale(30), height: scale(30), borderRadius: scale(15), backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  coHostAvatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   coHostAvatarText: { color: colors.white, fontSize: 11, fontWeight: '700' },
   coHostRowName: { color: colors.white, fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  coHostToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)' },
+  coHostToggle: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)' },
   coHostToggleActive: { backgroundColor: 'rgba(255,193,7,0.9)', borderColor: 'rgba(255,193,7,0.9)' },
   coHostToggleText: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
   coHostToggleTextActive: { color: '#3A2900' },
   coHostCloseBtn: { backgroundColor: 'rgba(255,255,255,0.08)', paddingVertical: 11, borderRadius: 12, alignItems: 'center', marginTop: 4 },
   coHostCloseBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
-  dropdownModal: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: scale(250), maxWidth: '92%', borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
+  dropdownModal: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: 250, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
   dropdownHeader: { color: colors.primaryLight, fontWeight: '700', fontSize: 14, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
   dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  dropdownIcon: { fontSize: 16 },
   dropdownText: { fontSize: 14 },
-  dropdownClose: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10 },
+  dropdownClose: { paddingVertical: 10, alignItems: 'center' },
   dropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
   approvalCard: { position: 'absolute', top: 90, right: 72, backgroundColor: '#1E1E3F', borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, maxWidth: 340, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)', elevation: 20 },
   approvalLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  approvalAvatar: { width: scale(34), height: scale(34), borderRadius: scale(17), backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  approvalAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   approvalAvatarText: { color: colors.white, fontWeight: '700', fontSize: 11 },
   approvalTitle: { color: colors.white, fontSize: 13, fontWeight: '600' },
   approvalTimer: { height: 3, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, width: 100, marginTop: 5 },
   approvalTimerFill: { width: '70%', height: 3, backgroundColor: colors.primary, borderRadius: 2 },
   approvalButtons: { flexDirection: 'column', gap: 6 },
-  approveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.green, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8 },
+  approveBtn: { backgroundColor: colors.green, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
   approveBtnText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  declineBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.red, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8 },
+  declineBtn: { backgroundColor: colors.red, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
   declineBtnText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  }), [scale]);
-}
+});
