@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kesher — live sessions built for coming back to</title>
+<meta name="description" content="Kesher is a live video platform for hosts and the people they teach, coach, or meet with — sessions, community channels, and everything in between.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-deep:#120818;
+    --bg-mid:#241030;
+    --accent-bright:#C084FC;
+    --accent-mid:#A855F7;
+    --accent-deep:#7E22CE;
+    --text-primary:#F4F3FF;
+    --text-muted:rgba(244,243,255,0.62);
+    --step-dur:0.7s;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;overflow:hidden;background:var(--bg-deep);}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    color:var(--text-primary);
+    background:radial-gradient(120% 90% at 50% 12%, var(--bg-mid) 0%, var(--bg-deep) 60%);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .visually-hidden{
+    position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap;
+  }
+
+  /* ── Persistent header — not part of the scroll sequence ── */
+  header{
+    position:fixed;top:0;left:0;right:0;z-index:20;
+    display:flex;align-items:center;gap:10px;
+    padding:22px 26px;
+    opacity:0;animation:fadeInDown 0.9s 0.15s ease forwards;
+  }
+  header img{width:28px;height:28px;display:block;}
+  header span{
+    font-family:'Sora',sans-serif;font-weight:700;font-size:16px;
+    letter-spacing:0.01em;
+  }
+  @keyframes fadeInDown{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}
+
+  /* ── Background connection motif — echoes the logo's own linked-dots mark ── */
+  .motif{
+    position:fixed;inset:0;z-index:0;
+    opacity:0.5;pointer-events:none;
+  }
+  .motif circle{fill:var(--accent-bright);opacity:0.55;}
+  .motif path{
+    fill:none;stroke:var(--accent-bright);stroke-width:1;opacity:0.28;
+    stroke-dasharray:6 10;
+    animation:driftDash 18s linear infinite;
+  }
+  @keyframes driftDash{to{stroke-dashoffset:-320;}}
+  @media (prefers-reduced-motion:reduce){
+    .motif path{animation:none;}
+  }
+
+  /* ── Stage — one full-viewport step at a time ── */
+  .stage{
+    position:fixed;inset:0;z-index:1;
+  }
+  .panel{
+    position:absolute;left:50%;top:50%;
+    width:min(560px, 84vw);
+    transform:translate(-50%,-50%) translateY(46px);
+    opacity:0;
+    pointer-events:none;
+    transition:transform var(--step-dur) cubic-bezier(.16,.84,.44,1), opacity calc(var(--step-dur) * 0.85) ease;
+  }
+  .panel.active{
+    opacity:1;
+    transform:translate(-50%,-50%) translateY(0);
+    pointer-events:auto;
+  }
+  .panel.prev{
+    opacity:0;
+    transform:translate(-50%,-50%) translateY(-46px);
+  }
+  @media (prefers-reduced-motion:reduce){
+    .panel{transition:opacity 0.25s ease;transform:translate(-50%,-50%) !important;}
+  }
+
+  .panel p{
+    font-size:clamp(19px, 2.6vw, 25px);
+    line-height:1.55;
+    font-weight:400;
+    color:var(--text-primary);
+    text-align:center;
+  }
+  .panel.opening p{
+    font-family:'Sora',sans-serif;font-weight:600;
+    font-size:clamp(22px, 3.2vw, 30px);
+    line-height:1.4;
+  }
+
+  /* ── Final panel — the actual Continue action ── */
+  .panel.cta{ text-align:center; }
+  .panel.cta h2{
+    font-family:'Sora',sans-serif;font-weight:700;
+    font-size:clamp(22px,3vw,28px);
+    margin-bottom:26px;
+  }
+  .continue-btn{
+    display:inline-flex;align-items:center;gap:10px;
+    padding:15px 30px;
+    border-radius:14px;
+    font-family:'Inter',sans-serif;font-weight:600;font-size:15.5px;
+    color:var(--text-primary);
+    text-decoration:none;
+    background:linear-gradient(135deg, var(--accent-bright), var(--accent-mid) 55%, var(--accent-deep));
+    box-shadow:0 8px 28px rgba(168,85,247,0.35);
+  }
+  .continue-btn svg{width:16px;height:16px;}
+
+  /* ── Progress dots ── */
+  .progress{
+    position:fixed;left:50%;bottom:30px;transform:translateX(-50%);
+    z-index:20;display:flex;gap:9px;
+  }
+  .progress button{
+    width:7px;height:7px;border-radius:50%;
+    border:none;padding:0;cursor:pointer;
+    background:rgba(244,243,255,0.28);
+    transition:background 0.35s ease, transform 0.35s ease;
+  }
+  .progress button.active{
+    background:var(--text-primary);
+    transform:scale(1.35);
+  }
+
+  /* ── First-panel scroll hint ── */
+  .hint{
+    position:fixed;left:50%;bottom:56px;transform:translateX(-50%);
+    z-index:20;display:flex;flex-direction:column;align-items:center;gap:6px;
+    font-size:11.5px;color:var(--text-muted);letter-spacing:0.04em;text-transform:uppercase;
+    opacity:1;transition:opacity 0.5s ease;
+  }
+  .hint svg{width:14px;height:14px;animation:bob 1.6s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0);}50%{transform:translateY(5px);}}
+  body.started .hint{opacity:0;pointer-events:none;}
+  @media (prefers-reduced-motion:reduce){.hint svg{animation:none;}}
+
+  .noscript-fallback{
+    position:relative;z-index:5;
+    max-width:640px;margin:0 auto;padding:120px 24px 80px;
+  }
+  .noscript-fallback p{font-size:17px;line-height:1.7;margin-bottom:22px;color:var(--text-primary);}
+  .noscript-fallback a{color:var(--accent-bright);}
+</style>
+</head>
+<body>
+
+<svg class="visually-hidden" width="0" height="0"><title>Kesher — a live video platform for hosts and the people they meet with</title></svg>
+
+<header>
+  <img src="logo.png" alt="" onerror="this.style.display='none'">
+  <span>Kesher</span>
+</header>
+
+<svg class="motif" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <path d="M60,120 Q110,90 160,140 T260,180" />
+  <path d="M300,260 Q250,300 280,360 T220,440" />
+  <path d="M80,520 Q140,560 120,620 T190,690" />
+  <path d="M320,560 Q360,610 330,670" />
+  <circle cx="60" cy="120" r="3"/><circle cx="160" cy="140" r="2.5"/><circle cx="260" cy="180" r="3"/>
+  <circle cx="300" cy="260" r="2.5"/><circle cx="280" cy="360" r="3"/><circle cx="220" cy="440" r="2.5"/>
+  <circle cx="80" cy="520" r="3"/><circle cx="120" cy="620" r="2.5"/><circle cx="190" cy="690" r="3"/>
+  <circle cx="320" cy="560" r="2.5"/><circle cx="330" cy="670" r="3"/>
+</svg>
+
+<main class="stage" role="region" aria-roledescription="carousel" aria-label="About Kesher">
+  <p class="visually-hidden">Use the arrow keys, scroll, or the dots below to move through this introduction.</p>
+
+  <section class="panel opening" data-index="0">
+    <p>Kesher means connection. It's also what happens the moment a host opens a session and the people they teach or meet with show up.</p>
+  </section>
+
+  <section class="panel" data-index="1">
+    <p>A class, an interview, a coaching call, a get-together — live, on video, with a shared whiteboard, polls, and a raised hand that's actually seen. When a session fills up, a waitlist holds the next spot and fills it automatically the moment one opens.</p>
+  </section>
+
+  <section class="panel" data-index="2">
+    <p>Outside of sessions, Community keeps things going. A host runs a channel around what they teach, posts notes and updates, and can start a session with the whole group in one tap.</p>
+  </section>
+
+  <section class="panel" data-index="3">
+    <p>Built for the people who meet again and again — a class that continues, a mentor and the person they're guiding. Not a one-off call. A place.</p>
+  </section>
+
+  <section class="panel cta" data-index="4">
+    <h2>See it for yourself.</h2>
+    <a class="continue-btn" href="https://YOUR-APP-DOMAIN.vercel.app">
+      Continue to Kesher
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </a>
+  </section>
+</main>
+
+<nav class="progress" aria-label="Section progress"></nav>
+
+<div class="hint" aria-hidden="true">
+  <span>Scroll</span>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+</div>
+
+<noscript>
+  <style>.stage,.progress,.hint,.motif{display:none;}</style>
+  <div class="noscript-fallback">
+    <p>Kesher means connection. It's also what happens the moment a host opens a session and the people they teach or meet with show up.</p>
+    <p>A class, an interview, a coaching call, a get-together — live, on video, with a shared whiteboard, polls, and a raised hand that's actually seen. When a session fills up, a waitlist holds the next spot and fills it automatically the moment one opens.</p>
+    <p>Outside of sessions, Community keeps things going. A host runs a channel around what they teach, posts notes and updates, and can start a session with the whole group in one tap.</p>
+    <p>Built for the people who meet again and again — a class that continues, a mentor and the person they're guiding. Not a one-off call. A place.</p>
+    <p><a href="https://YOUR-APP-DOMAIN.vercel.app">Continue to Kesher</a></p>
+  </div>
+</noscript>
+
+<script>
+(function(){
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.panel'));
+  var progressNav = document.querySelector('.progress');
+  var current = 0;
+  var locked = false;
+  var wheelAccum = 0;
+
+  panels.forEach(function(_, i){
+    var dot = document.createElement('button');
+    dot.type = 'button';
+    dot.setAttribute('aria-label', 'Go to section ' + (i + 1) + ' of ' + panels.length);
+    dot.addEventListener('click', function(){ goTo(i); });
+    progressNav.appendChild(dot);
+  });
+  var dots = Array.prototype.slice.call(progressNav.children);
+
+  function render(){
+    panels.forEach(function(el, i){
+      el.classList.remove('active', 'prev');
+      el.setAttribute('aria-hidden', i === current ? 'false' : 'true');
+      if (i === current) el.classList.add('active');
+      else if (i < current) el.classList.add('prev');
+    });
+    dots.forEach(function(d, i){ d.classList.toggle('active', i === current); });
+  }
+
+  function goTo(index){
+    if (locked || index === current || index < 0 || index >= panels.length) return;
+    current = index;
+    locked = true;
+    document.body.classList.add('started');
+    render();
+    setTimeout(function(){ locked = false; }, 720);
+  }
+
+  function step(dir){ goTo(current + dir); }
+
+  window.addEventListener('wheel', function(e){
+    e.preventDefault();
+    wheelAccum += e.deltaY;
+    if (Math.abs(wheelAccum) > 24) {
+      step(wheelAccum > 0 ? 1 : -1);
+      wheelAccum = 0;
+    }
+  }, { passive: false });
+
+  var touchStartY = null;
+  window.addEventListener('touchstart', function(e){ touchStartY = e.touches[0].clientY; }, { passive: true });
+  window.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
+  window.addEventListener('touchend', function(e){
+    if (touchStartY === null) return;
+    var delta = touchStartY - e.changedTouches[0].clientY;
+    if (Math.abs(delta) > 42) step(delta > 0 ? 1 : -1);
+    touchStartY = null;
+  });
+
+  window.addEventListener('keydown', function(e){
+    if (['ArrowDown','PageDown',' '].indexOf(e.key) > -1) { e.preventDefault(); step(1); }
+    else if (['ArrowUp','PageUp'].indexOf(e.key) > -1) { e.preventDefault(); step(-1); }
+  });
+
+  render();
+})();
+</script>
+
+</body>
+</html>

@@ -533,40 +533,75 @@ export default function AttendeeSession({ navigation, route }) {
     agoraSessionRef.current = null;
   };
 
-  const leaveSession = async (forced = false) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('session_attendees')
-          .update({ left_at: new Date().toISOString() })
-          .eq('session_id', session?.id)
-          .eq('user_id', user.id);
-      }
-      await leaveAgoraOnly();
-    } catch (e) {}
-    if (forced) Alert.alert('Session ended', 'The host has ended the session.');
-    navigation.navigate('AttendeeDashboard');
-  };
+ const leaveSession = async (forced = false) => {
+  console.log('🚪 Leaving session:', session?.id);
 
-  const handleLeave = () => {
-    Alert.alert('Leave this session?', undefined, [
-      { text: 'Cancel', style: 'cancel' },
+  try {
+    // Get the current user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      console.warn('Could not get current user:', userError.message);
+    }
+
+    // Mark attendee as having left
+    if (user && session?.id) {
+      const { error: updateError } = await supabase
+        .from('session_attendees')
+        .update({ left_at: new Date().toISOString() })
+        .eq('session_id', session.id)
+        .eq('user_id', user.id);
+
+      if (updateError) {
+        console.error('❌ Failed to update left_at:', updateError);
+      } else {
+        console.log('✅ left_at updated');
+      }
+    }
+
+    // Leave Agora
+    try {
+      await leaveAgoraOnly();
+      console.log('✅ Left Agora');
+    } catch (agoraError) {
+      console.error('❌ Agora leave error:', agoraError);
+    }
+
+  } catch (error) {
+    console.error('❌ Leave session error:', error);
+  } finally {
+    // ALWAYS leave the session screen
+    if (forced) {
+      Alert.alert(
+        'Session ended',
+        'The host has ended the session.'
+      );
+    }
+
+    navigation.replace('AttendeeDashboard');
+  }
+};
+
+ const handleLeave = () => {
+  Alert.alert(
+    'Leave this session?',
+    'Are you sure you want to leave?',
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
       {
         text: 'Leave',
         style: 'destructive',
-        // Used to duplicate leaveSession's logic here with none of its
-        // safety — a bare `await leaveAgoraOnly()` with no try/catch,
-        // so the same Agora-throws-and-kills-the-handler bug fixed in
-        // SessionMain's endSession() was quietly sitting here too,
-        // just for the attendee's own "Leave" button instead of the
-        // host's "End session" one. Reusing leaveSession(false) instead
-        // of a second copy means there's exactly one leave path to keep
-        // safe, not two that can drift out of sync.
         onPress: () => leaveSession(false),
       },
-    ]);
-  };
+    ]
+  );
+};
 
   const toggleMic = async () => {
     try {

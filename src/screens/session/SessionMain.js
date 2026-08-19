@@ -569,7 +569,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
 };
 
   const leaveAgora = async () => {
-    await agoraSessionRef.current?.leave();
+    try {
+      await agoraSessionRef.current?.leave();
+    } catch (e) {
+      console.log('Agora leave error (non-fatal):', e.message);
+    }
     agoraSessionRef.current = null;
   };
 
@@ -868,8 +872,19 @@ function getProfileKey(uplink = 0, downlink = 0) {
         text: 'End session',
         style: 'destructive',
         onPress: async () => {
-          await leaveAgora();
-          await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
+          // Status update goes FIRST and is checked. This exact function
+          // has regressed back to the "leaveAgora first, unguarded, no
+          // check" shape twice now in different uploads — reordering so
+          // the actual state change (ending the session for everyone)
+          // happens before the best-effort Agora cleanup, and checking
+          // its result, is what stops a flaky Agora disconnect from
+          // silently eating the whole handler again.
+          const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
+          if (error) {
+            Alert.alert('Could not end session', error.message);
+            return;
+          }
+          await leaveAgora(); // internally try/caught now — can't block the line above
           navigation.navigate('EndSession', { session });
         },
       },
