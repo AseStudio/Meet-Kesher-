@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Modal, Alert
+  ScrollView, Modal, Alert, Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -575,17 +575,24 @@ export default function AttendeeSession({ navigation, route }) {
   } finally {
     // ALWAYS leave the session screen
     if (forced) {
-      Alert.alert(
-        'Session ended',
-        'The host has ended the session.'
-      );
+      if (Platform.OS === 'web') window.alert('Session ended: the host has ended the session.');
+      else Alert.alert('Session ended', 'The host has ended the session.');
     }
 
     navigation.replace('AttendeeDashboard');
   }
 };
 
+ // react-native-web doesn't reliably render Alert.alert's button array — the
+ // confirm UI never appears, so tapping Leave looked like it did nothing
+ // (the actual leaveSession(false) call only ever lived inside that button's
+ // onPress). Use the browser's own confirm() on web instead; native keeps
+ // Alert.alert. See SessionMain.js's endSession for the matching host-side fix.
  const handleLeave = () => {
+  if (Platform.OS === 'web') {
+    if (window.confirm('Leave this session? Are you sure you want to leave?')) leaveSession(false);
+    return;
+  }
   Alert.alert(
     'Leave this session?',
     'Are you sure you want to leave?',
