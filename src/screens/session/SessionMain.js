@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert,
-  ScrollView, Modal
+  ScrollView, Modal, Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -866,29 +866,35 @@ function getProfileKey(uplink = 0, downlink = 0) {
   };
 
   const endSession = () => {
-    Alert.alert('End session for everyone?', undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'End session',
-        style: 'destructive',
-        onPress: async () => {
-          // Status update goes FIRST and is checked. This exact function
-          // has regressed back to the "leaveAgora first, unguarded, no
-          // check" shape twice now in different uploads — reordering so
-          // the actual state change (ending the session for everyone)
-          // happens before the best-effort Agora cleanup, and checking
-          // its result, is what stops a flaky Agora disconnect from
-          // silently eating the whole handler again.
-          const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
-          if (error) {
-            Alert.alert('Could not end session', error.message);
-            return;
-          }
-          await leaveAgora(); // internally try/caught now — can't block the line above
-          navigation.navigate('EndSession', { session });
-        },
-      },
-    ]);
+    // Status update goes FIRST and is checked. This exact function has
+    // regressed back to the "leaveAgora first, unguarded, no check" shape
+    // twice now in different uploads — reordering so the actual state
+    // change (ending the session for everyone) happens before the
+    // best-effort Agora cleanup, and checking its result, is what stops a
+    // flaky Agora disconnect from silently eating the whole handler again.
+    const proceed = async () => {
+      const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
+      if (error) {
+        if (Platform.OS === 'web') window.alert(`Could not end session: ${error.message}`);
+        else Alert.alert('Could not end session', error.message);
+        return;
+      }
+      await leaveAgora(); // internally try/caught now — can't block the line above
+      navigation.navigate('EndSession', { session });
+    };
+
+    // react-native-web doesn't reliably render Alert.alert's button array —
+    // the confirm UI never appears, so the destructive action (which only
+    // ran from inside that button's onPress) silently never fired. Use the
+    // browser's own confirm() on web instead; native keeps Alert.alert.
+    if (Platform.OS === 'web') {
+      if (window.confirm('End session for everyone?')) proceed();
+    } else {
+      Alert.alert('End session for everyone?', undefined, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'End session', style: 'destructive', onPress: proceed },
+      ]);
+    }
   };
 
   const formatTime = (secs) => {
@@ -1459,8 +1465,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
              { icon: 'person-remove-outline', label: 'Remove from Session', color: colors.red, action: () => {
   const userInfo = uidToUser[showDropdown];
   const targetUid = showDropdown;
+  const msg = `Remove ${userInfo?.name || 'this user'} from the session?`;
+  if (Platform.OS === 'web') {
+    if (window.confirm(msg)) removeAttendeeFromSession(targetUid);
+    return;
+  }
   Alert.alert(
-    `Remove ${userInfo?.name || 'this user'} from the session?`,
+    msg,
     undefined,
     [
       { text: 'Cancel', style: 'cancel' },
@@ -1472,50 +1483,57 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const userInfo = uidToUser[showDropdown];
   const targetUid = showDropdown;
   if (!userInfo) {
-    Alert.alert('Cannot ban user', 'Cannot identify this user yet. Try again in a moment.');
+    if (Platform.OS === 'web') window.alert('Cannot identify this user yet. Try again in a moment.');
+    else Alert.alert('Cannot ban user', 'Cannot identify this user yet. Try again in a moment.');
+    return;
+  }
+
+  const doBan = async () => {
+    try {
+      const { data: { user: hostUserAuth } } = await supabase.auth.getUser();
+
+      await supabase.from('bans').insert({
+        host_id: hostUserAuth.id,
+        banned_user_id: userInfo.userId,
+        session_id: session.id,
+        reason: 'Banned by host during session',
+      });
+
+      await supabase.from('session_attendees')
+        .update({ left_at: new Date().toISOString() })
+        .eq('session_id', session.id)
+        .eq('user_id', userInfo.userId);
+
+      controlChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'user-banned',
+        payload: { userId: userInfo.userId },
+      });
+
+      setRemoteUsers(prev => prev.filter(u => u.uid !== targetUid));
+      clearAttendeeFromAllState(targetUid);
+      if (coHosts[targetUid]) {
+        controlChannelRef.current?.send({ type: 'broadcast', event: 'co-host-revoked', payload: { uid: targetUid } });
+      }
+      if (Platform.OS === 'web') window.alert(`${userInfo.name} has been banned.`);
+      else Alert.alert('Banned', `${userInfo.name} has been banned.`);
+    } catch (e) {
+      if (Platform.OS === 'web') window.alert(`Failed to ban: ${e.message}`);
+      else Alert.alert('Failed to ban', e.message);
+    }
+  };
+
+  const msg = `Ban ${userInfo.name} from all your sessions?`;
+  if (Platform.OS === 'web') {
+    if (window.confirm(msg)) doBan();
     return;
   }
   Alert.alert(
-    `Ban ${userInfo.name} from all your sessions?`,
+    msg,
     undefined,
     [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Ban',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const { data: { user: hostUserAuth } } = await supabase.auth.getUser();
-
-            await supabase.from('bans').insert({
-              host_id: hostUserAuth.id,
-              banned_user_id: userInfo.userId,
-              session_id: session.id,
-              reason: 'Banned by host during session',
-            });
-
-            await supabase.from('session_attendees')
-              .update({ left_at: new Date().toISOString() })
-              .eq('session_id', session.id)
-              .eq('user_id', userInfo.userId);
-
-            controlChannelRef.current?.send({
-              type: 'broadcast',
-              event: 'user-banned',
-              payload: { userId: userInfo.userId },
-            });
-
-            setRemoteUsers(prev => prev.filter(u => u.uid !== targetUid));
-            clearAttendeeFromAllState(targetUid);
-            if (coHosts[targetUid]) {
-              controlChannelRef.current?.send({ type: 'broadcast', event: 'co-host-revoked', payload: { uid: targetUid } });
-            }
-            Alert.alert('Banned', `${userInfo.name} has been banned.`);
-          } catch (e) {
-            Alert.alert('Failed to ban', e.message);
-          }
-        },
-      },
+      { text: 'Ban', style: 'destructive', onPress: doBan },
     ]
   );
 }},

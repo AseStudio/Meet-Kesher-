@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -60,7 +61,7 @@ export default function ChannelsTab({ navigation, isHost, isVerified }) {
         setMyChannelIds(new Set((memberships || []).map((m) => m.channel_id)));
       }
     } catch (e) {
-      Alert.alert('Could not load channels', e.message);
+      showAlert('Could not load channels', e.message);
     } finally {
       setLoading(false);
     }
@@ -84,7 +85,7 @@ export default function ChannelsTab({ navigation, isHost, isVerified }) {
         next.delete(channelId);
         return next;
       });
-      Alert.alert('Could not join channel', error.message);
+      showAlert('Could not join channel', error.message);
     }
   };
 

@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -46,7 +47,7 @@ export default function ChannelRolesScreen({ navigation, route }) {
       if (error) throw error;
       setMembers(data || []);
     } catch (e) {
-      Alert.alert('Could not load members', e.message);
+      showAlert('Could not load members', e.message);
     } finally {
       setLoading(false);
     }
@@ -63,7 +64,7 @@ export default function ChannelRolesScreen({ navigation, route }) {
       .eq('user_id', userId);
     setUpdatingId(null);
     if (error) {
-      Alert.alert('Could not update role', error.message);
+      showAlert('Could not update role', error.message);
       return;
     }
     setMembers((prev) => prev.map((m) => (m.user_id === userId ? { ...m, role } : m)));

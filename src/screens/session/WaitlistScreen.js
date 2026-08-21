@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -71,7 +72,7 @@ export default function WaitlistScreen({ navigation, route }) {
       if (error) throw error;
       setRows(data || []);
     } catch (e) {
-      Alert.alert('Could not load waitlist', e.message);
+      showAlert('Could not load waitlist', e.message);
     } finally {
       setLoading(false);
     }
@@ -101,9 +102,9 @@ export default function WaitlistScreen({ navigation, route }) {
     if (insertError) {
       setBusyId(null);
       if (insertError.message?.toLowerCase().includes('full')) {
-        Alert.alert('Still full', 'There\'s no open spot right now — remove an attendee first, or wait for one to leave.');
+        showAlert('Still full', 'There\'s no open spot right now — remove an attendee first, or wait for one to leave.');
       } else {
-        Alert.alert('Could not add attendee', insertError.message);
+        showAlert('Could not add attendee', insertError.message);
       }
       return;
     }
@@ -116,7 +117,7 @@ export default function WaitlistScreen({ navigation, route }) {
     setBusyId(row.id);
     const { error } = await supabase.from('session_waitlist').delete().eq('id', row.id);
     setBusyId(null);
-    if (error) Alert.alert('Could not remove', error.message);
+    if (error) showAlert('Could not remove', error.message);
   };
 
   const renderItem = ({ item, index }) => {

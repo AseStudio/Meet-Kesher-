@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from './supabase';
 import { LOBBY_DURATION_SECONDS } from './constants';
+import { showAlert } from './alert';
 
 // How long the host has, after the lobby timer hits 0, before an
 // unattended session gets auto-cancelled. Matches the countdown
@@ -122,7 +123,7 @@ export function useExpiredLobbyWatcher(sessions) {
       setVisible(false);
       navigation.navigate('SessionMain', { session: { ...expiredSession, status: 'live' } });
     } catch (e) {
-      Alert.alert('Could not start session', e.message);
+      showAlert('Could not start session', e.message);
     } finally {
       setStarting(false);
     }
@@ -142,7 +143,7 @@ export function useExpiredLobbyWatcher(sessions) {
       setExpiredSession(null);
       onDone?.();
     } catch (e) {
-      Alert.alert('Could not cancel session', e.message);
+      showAlert('Could not cancel session', e.message);
     } finally {
       setCancelling(false);
     }

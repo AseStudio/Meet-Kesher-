@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   Alert,
+  Platform,
 } from 'react-native';
 import Svg, { Path, Rect, Circle, Line, Text as SvgText, G } from 'react-native-svg';
 import {
@@ -648,20 +649,22 @@ export default function WhiteboardCanvas({
   };
 
   const clearBoard = () => {
+    const doClear = () => {
+      setStrokes([]);
+      broadcast('clear');
+      clearBoardRemote();
+    };
+    const msg = 'Clear board? This removes every stroke on this page for everyone.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) doClear();
+      return;
+    }
     Alert.alert(
       'Clear board?',
       'This removes every stroke on this page for everyone.',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: () => {
-            setStrokes([]);
-            broadcast('clear');
-            clearBoardRemote();
-          },
-        },
+        { text: 'Clear', style: 'destructive', onPress: doClear },
       ]
     );
   };

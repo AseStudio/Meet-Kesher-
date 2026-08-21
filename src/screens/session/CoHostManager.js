@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { colors } from '../../theme/colors';
+import { showAlert } from '../../lib/alert';
 
 const attendeeList = [
   { id: 1, name: 'Alice Morgan', avatar: 'AM' },
@@ -17,7 +18,7 @@ export default function CoHostManager({ navigation }) {
 
   const appoint = (attendee) => {
     if (coHosts.find(c => c.id === attendee.id)) {
-      Alert.alert('Already Co-host', `${attendee.name} is already a co-host.`);
+      showAlert('Already Co-host', `${attendee.name} is already a co-host.`);
       return;
     }
     setCoHosts([...coHosts, { ...attendee, order: coHosts.length + 1 }]);

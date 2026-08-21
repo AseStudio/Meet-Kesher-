@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { generateSessionCode, generateSessionPassword } from '../../lib/sessionCodes';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -75,7 +76,7 @@ export default function ChannelChatScreen({ navigation, route }) {
       (reactionRows || []).forEach((r) => { map[r.message_id] = r.reaction; });
       setMyReactions(map);
     } catch (e) {
-      Alert.alert('Could not load channel', e.message);
+      showAlert('Could not load channel', e.message);
     } finally {
       setLoading(false);
     }
@@ -111,7 +112,7 @@ export default function ChannelChatScreen({ navigation, route }) {
       body,
     });
     setSending(false);
-    if (error) Alert.alert('Could not send', error.message);
+    if (error) showAlert('Could not send', error.message);
   };
 
   const toggleReaction = async (messageId) => {
@@ -175,7 +176,7 @@ export default function ChannelChatScreen({ navigation, route }) {
 
       navigation.navigate('Lobby', { session: data });
     } catch (e) {
-      Alert.alert('Could not start session', e.message);
+      showAlert('Could not start session', e.message);
     } finally {
       setStartingSession(false);
     }

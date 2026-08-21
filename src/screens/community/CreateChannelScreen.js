@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -27,7 +28,7 @@ export default function CreateChannelScreen({ navigation }) {
 
   const create = async () => {
     if (!name.trim()) {
-      Alert.alert('Name required', 'Give your channel a name.');
+      showAlert('Name required', 'Give your channel a name.');
       return;
     }
     setSaving(true);
@@ -54,7 +55,7 @@ export default function CreateChannelScreen({ navigation }) {
 
       navigation.replace('ChannelChat', { channelId: data.id, channelName: data.name });
     } catch (e) {
-      Alert.alert('Could not create channel', e.message);
+      showAlert('Could not create channel', e.message);
       setSaving(false);
     }
   };

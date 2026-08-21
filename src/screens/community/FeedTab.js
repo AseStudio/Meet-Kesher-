@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 const palette = {
   primary: colors.primary,
@@ -59,7 +60,7 @@ export default function FeedTab({ isHost, isVerified }) {
         .eq('user_id', user.id);
       setMyReactions(new Set((reactionRows || []).map((r) => r.post_id)));
     } catch (e) {
-      Alert.alert('Could not load feed', e.message);
+      showAlert('Could not load feed', e.message);
     } finally {
       setLoading(false);
     }
@@ -77,7 +78,7 @@ export default function FeedTab({ isHost, isVerified }) {
       .update({ status: decision, published_at: decision === 'published' ? new Date().toISOString() : null })
       .eq('id', post.id);
     if (error) {
-      Alert.alert('Could not update', error.message);
+      showAlert('Could not update', error.message);
       load();
       return;
     }

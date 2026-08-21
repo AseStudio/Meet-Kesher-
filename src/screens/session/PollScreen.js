@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 /**
  * PollScreen
@@ -203,9 +204,9 @@ export default function PollScreen({ navigation, route }) {
   const launchPoll = async () => {
     const trimmedQuestion = question.trim();
     const trimmedOptions = options.map((o) => o.trim()).filter(Boolean);
-    if (!trimmedQuestion) return Alert.alert('Missing question', 'Add a question before launching.');
-    if (trimmedOptions.length < 2) return Alert.alert('Not enough options', 'Add at least 2 options.');
-    if (!myId) return Alert.alert('Not ready', 'Still confirming your identity — try again in a moment.');
+    if (!trimmedQuestion) return showAlert('Missing question', 'Add a question before launching.');
+    if (trimmedOptions.length < 2) return showAlert('Not enough options', 'Add at least 2 options.');
+    if (!myId) return showAlert('Not ready', 'Still confirming your identity — try again in a moment.');
 
     const { data, error } = await supabase
       .from('session_polls')
@@ -222,7 +223,7 @@ export default function PollScreen({ navigation, route }) {
 
     if (error) {
       console.warn('launchPoll error', error);
-      Alert.alert('Could not launch poll', error.message);
+      showAlert('Could not launch poll', error.message);
       return;
     }
 
@@ -266,7 +267,7 @@ export default function PollScreen({ navigation, route }) {
       .eq('id', poll.id);
     if (error) {
       console.warn('closePoll error', error);
-      Alert.alert('Could not close poll', error.message);
+      showAlert('Could not close poll', error.message);
       return;
     }
 

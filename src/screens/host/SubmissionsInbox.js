@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens.
@@ -132,7 +133,7 @@ export default function SubmissionsInbox({ navigation }) {
       setReplyModal(null);
       setReplyText('');
     } catch (e) {
-      Alert.alert('Failed to send reply', e.message);
+      showAlert('Failed to send reply', e.message);
     } finally {
       setSending(false);
     }
@@ -141,7 +142,7 @@ export default function SubmissionsInbox({ navigation }) {
   const viewFile = (url) => {
     if (!url) return;
     Linking.openURL(url).catch(() =>
-      Alert.alert('Could not open file', 'The link may be invalid.')
+      showAlert('Could not open file', 'The link may be invalid.')
     );
   };
 
@@ -169,10 +170,10 @@ export default function SubmissionsInbox({ navigation }) {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri);
       } else {
-        Alert.alert('Downloaded', `Saved to ${uri}`);
+        showAlert('Downloaded', `Saved to ${uri}`);
       }
     } catch (e) {
-      Alert.alert('Download failed', e.message);
+      showAlert('Download failed', e.message);
     }
   };
 

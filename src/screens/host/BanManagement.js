@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens.
@@ -73,7 +74,7 @@ export default function BanManagement({ navigation }) {
   };
 
   const liftBan = (ban) => {
-    Alert.alert(
+    showAlert(
       'Lift ban',
       `Lift ban for ${ban.banned_name}? They will be able to join your sessions again.`,
       [
@@ -93,7 +94,7 @@ export default function BanManagement({ navigation }) {
       if (error) throw error;
       setBans(prev => prev.filter(b => b.id !== ban.id));
     } catch (e) {
-      Alert.alert('Failed to lift ban', e.message);
+      showAlert('Failed to lift ban', e.message);
     }
   };
 

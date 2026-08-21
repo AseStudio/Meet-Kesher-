@@ -11,6 +11,7 @@ import { LOBBY_DURATION_SECONDS } from '../../lib/constants';
 import { getSessionJoinLink } from '../../lib/links';
 import SessionExpiredModal from '../../components/SessionExpiredModal';
 import EnteringSessionTransition from '../../components/EnteringSessionTransition';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens
@@ -309,7 +310,7 @@ export default function LobbyScreen({ navigation, route }) {
             setGraceSecondsLeft(null);
             const { data: { user } } = await supabase.auth.getUser();
             if (user?.id !== payload.new.host_id) {
-              Alert.alert('Session cancelled', 'The host cancelled this session.');
+              showAlert('Session cancelled', 'The host cancelled this session.');
               navigation.navigate('AttendeeDashboard');
             }
           }
@@ -344,7 +345,7 @@ export default function LobbyScreen({ navigation, route }) {
       // Navigation happens via the realtime listener (which now goes
       // through enterSessionWithTransition too, same as everyone else)
     } catch (err) {
-      Alert.alert('Could not start session', err.message);
+      showAlert('Could not start session', err.message);
       setStarting(false);
       sessionStartedRef.current = false;
       setGraceSecondsLeft(GRACE_PERIOD_SECONDS); // restart grace if start failed
@@ -366,7 +367,7 @@ export default function LobbyScreen({ navigation, route }) {
       setShowExpiredModal(false);
       setWasCancelled(true);
     } catch (err) {
-      Alert.alert('Could not cancel session', err.message);
+      showAlert('Could not cancel session', err.message);
     } finally {
       setCancelling(false);
     }
@@ -683,7 +684,7 @@ export default function LobbyScreen({ navigation, route }) {
               <TouchableOpacity
                 style={styles.earlyCancelLink}
                 onPress={() => {
-                  Alert.alert(
+                  showAlert(
                     'Cancel this session before it starts?',
                     undefined,
                     [

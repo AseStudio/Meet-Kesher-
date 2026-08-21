@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { showAlert } from '../../lib/alert';
 
 export default function TimerScreen({ navigation }) {
   const [minutes, setMinutes] = useState('10');
@@ -40,7 +41,7 @@ export default function TimerScreen({ navigation }) {
   const s = parseInt(seconds) || 0;
   const total = (m * 60) + s;
   if (total <= 0) {
-    Alert.alert('Invalid Time', 'Please enter a time greater than 0.');
+    showAlert('Invalid Time', 'Please enter a time greater than 0.');
     return;
   }
   setTotalSeconds(total);

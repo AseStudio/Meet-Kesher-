@@ -7,6 +7,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 export default function SubmitFile({ navigation, route }) {
   const passedSession = route.params?.session;
@@ -83,20 +84,20 @@ export default function SubmitFile({ navigation, route }) {
       if (!asset) return;
 
       if (asset.size && asset.size > 20 * 1024 * 1024) {
-        Alert.alert('File too large', 'Maximum size is 20MB.');
+        showAlert('File too large', 'Maximum size is 20MB.');
         return;
       }
 
       setSelectedFile(asset); // { uri, name, size, mimeType }
       setUploadSuccess(false);
     } catch (e) {
-      Alert.alert('Could not open file picker', e.message);
+      showAlert('Could not open file picker', e.message);
     }
   };
 
   const uploadFile = async () => {
     if (!selectedFile || !selectedSession) {
-      Alert.alert('Missing info', !selectedFile ? 'Please select a file.' : 'Please select a session.');
+      showAlert('Missing info', !selectedFile ? 'Please select a file.' : 'Please select a session.');
       return;
     }
 
@@ -150,7 +151,7 @@ export default function SubmitFile({ navigation, route }) {
       loadMySubmissions();
 
     } catch (e) {
-      Alert.alert('Upload failed', e.message);
+      showAlert('Upload failed', e.message);
     } finally {
       setUploading(false);
     }
@@ -300,7 +301,7 @@ export default function SubmitFile({ navigation, route }) {
                       <TouchableOpacity
                         onPress={() =>
                           Linking.openURL(sub.file_url).catch(() =>
-                            Alert.alert('Could not open file', 'The link may be invalid.')
+                            showAlert('Could not open file', 'The link may be invalid.')
                           )
                         }
                       >

@@ -9,6 +9,7 @@ import SessionExpiredModal from '../../components/SessionExpiredModal';
 import { useExpiredLobbyWatcher } from '../../lib/useExpiredLobbyWatcher';
 import { usePushSubscription } from '../../lib/usePushSubscription';
 import { getSessionJoinLink } from '../../lib/links';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — layered on top of theme/colors.js rather than editing it
@@ -135,12 +136,12 @@ export default function HostDashboard({ navigation }) {
 
   const copyCode = async (code) => {
     await Clipboard.setStringAsync(code || '');
-    Alert.alert('Copied', `Code "${code}" copied!`);
+    showAlert('Copied', `Code "${code}" copied!`);
   };
 
   const copyJoinLink = async (code) => {
     await Clipboard.setStringAsync(getSessionJoinLink(code));
-    Alert.alert('Copied', 'Join link copied!');
+    showAlert('Copied', 'Join link copied!');
   };
 
   if (loading) {

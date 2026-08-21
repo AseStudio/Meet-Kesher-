@@ -36,9 +36,17 @@ const NATIVE_REDIRECT_URL = Linking.createURL('auth/callback');
  */
 export async function signInWithGoogle() {
   if (Platform.OS === 'web') {
+    // Used to redirect to window.location.origin (bare "/"). That's fine
+    // as long as "/" serves the Expo app — but it now serves the static
+    // marketing landing.html instead (see vercel.json), which has no
+    // Supabase client running on it at all. detectSessionInUrl (see
+    // lib/supabase.js) only fires once the Expo bundle actually loads, so
+    // a redirect back to "/" left the session tokens sitting unused in
+    // the URL and dropped the user on the landing page instead of into
+    // the app. Redirecting to "/app" instead lands on the real bundle.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: `${window.location.origin}/app` },
     });
     return { error };
   }
