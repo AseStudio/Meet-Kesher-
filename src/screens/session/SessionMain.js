@@ -1579,8 +1579,12 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
 function useSessionMainStyles(scale) {
   return useMemo(() => StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A1A' },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, paddingTop: 20, backgroundColor: '#0D0D2B' },
+  container: { flex: 1, backgroundColor: '#0A0A1A', position: 'relative' },
+  topBar: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 60,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: 12, paddingTop: 20, backgroundColor: 'rgba(13,13,43,0.68)',
+  },
   sessionTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
   modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 3 },
   modeBadgeText: { color: colors.white, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
@@ -1592,13 +1596,20 @@ function useSessionMainStyles(scale) {
   liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
   liveText: { color: colors.green, fontSize: 10, fontWeight: '700' },
-  signalsBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#12123A' },
+  signalsBar: {
+    position: 'absolute', top: 74, left: 0, right: 0, zIndex: 55,
+    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8, backgroundColor: 'rgba(18,18,58,0.68)',
+  },
   signalChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(91,46,255,0.25)', borderWidth: 1, borderColor: 'rgba(91,46,255,0.5)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
   signalChipText: { color: colors.white, fontSize: 11, fontWeight: '600', flexShrink: 1 },
-  mainContent: { flex: 1, flexDirection: 'row' },
+  mainContent: { ...StyleSheet.absoluteFillObject, flexDirection: 'row' },
 
   // ── ATTENDEE STRIP ──
-  attendeeStrip: { width: scale(104), backgroundColor: '#0D0D2B', paddingVertical: 6 },
+  attendeeStrip: {
+    position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 40,
+    width: scale(104), backgroundColor: 'rgba(13,13,43,0.55)', paddingVertical: 6,
+  },
   stripContent: { alignItems: 'center', gap: 10, paddingBottom: 8 },
   stripCell: { width: scale(88), alignItems: 'center', gap: 3 },
   stripVideoWrap: {
@@ -1655,12 +1666,12 @@ function useSessionMainStyles(scale) {
   noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
   pipContainer: {
-    position: 'absolute', bottom: 60, left: 14,
+    position: 'absolute', bottom: 60, left: scale(112),
     width: scale(92), height: scale(122),
     borderRadius: 12, overflow: 'hidden',
     borderWidth: 2, borderColor: colors.primary,
   },
-  viewToggle: { position: 'absolute', bottom: 14, flexDirection: 'row', backgroundColor: '#1E1E3F', borderRadius: 20, padding: 3, gap: 2, alignSelf: 'center', left: '30%' },
+  viewToggle: { position: 'absolute', bottom: 14, flexDirection: 'row', backgroundColor: '#1E1E3F', borderRadius: 20, padding: 3, gap: 2, alignSelf: 'center' },
   viewBtn: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 14 },
   viewBtnActive: { backgroundColor: colors.primary },
   viewBtnText: { color: colors.white, fontSize: 11, fontWeight: '600' },
@@ -1677,14 +1688,14 @@ function useSessionMainStyles(scale) {
   // WhiteboardCanvas / GraphBoardCanvas — this area just hosts it and
   // keeps the floating video PiP on top.
   boardMainArea: { flex: 1, position: 'relative', overflow: 'hidden' },
-  pipStack: { position: 'absolute', top: 12, left: 12, zIndex: 60, gap: 6 },
+  pipStack: { position: 'absolute', top: 78, left: scale(112), zIndex: 60, gap: 6 },
   stackPip: { width: scale(90), height: scale(116), borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
-  boardEditorsBar: { position: 'absolute', top: 12, right: 12, zIndex: 60, gap: 6, maxWidth: 200 },
+  boardEditorsBar: { position: 'absolute', top: 78, right: scale(72), zIndex: 60, gap: 6, maxWidth: 200 },
   boardEditorChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 16, paddingLeft: 10, paddingRight: 6, paddingVertical: 5 },
   boardEditorChipText: { color: colors.white, fontSize: 11, fontWeight: '600', maxWidth: 90 },
   boardEditorRemoveBtn: { backgroundColor: 'rgba(255,59,59,0.8)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   boardEditorRemoveText: { color: colors.white, fontSize: 10, fontWeight: '700' },
-  pendingCallBar: { position: 'absolute', top: 12, alignSelf: 'center', zIndex: 61, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
+  pendingCallBar: { position: 'absolute', top: 78, alignSelf: 'center', zIndex: 61, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
   pendingCallText: { color: colors.white, fontSize: 12, fontWeight: '600' },
   interruptBar: { position: 'absolute', bottom: 14, alignSelf: 'center', zIndex: 60 },
   interruptBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 20, paddingVertical: 11, borderRadius: 24, borderWidth: 1.5, borderColor: colors.primary },
@@ -1692,7 +1703,10 @@ function useSessionMainStyles(scale) {
   interruptBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
 
   // ── TOOLBAR ──
-  toolbarScroll: { width: scale(62), backgroundColor: '#0D0D2B' },
+  toolbarScroll: {
+    position: 'absolute', top: 0, bottom: 0, right: 0, zIndex: 40,
+    width: scale(62), backgroundColor: 'rgba(13,13,43,0.55)',
+  },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
   toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },

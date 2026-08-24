@@ -48,7 +48,7 @@ export default function VideoTile({
           }
         }
 
-        track.play(el, { mirror: !!mirror });
+        track.play(el, { mirror: !!mirror, fit: 'cover' });
       } catch (e) {
         console.log('VideoTile play error:', e.message);
       }

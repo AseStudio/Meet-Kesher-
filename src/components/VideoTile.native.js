@@ -26,7 +26,7 @@ export default function VideoTile({
       {hasVideo ? (
         <RtcSurfaceView
           style={StyleSheet.absoluteFill}
-          canvas={{ uid, mirrorMode: mirror ? 1 : 0 }}
+          canvas={{ uid, mirrorMode: mirror ? 1 : 0, renderMode: 1 /* Hidden: crop to fill, preserves aspect ratio */ }}
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.fallback]}>
