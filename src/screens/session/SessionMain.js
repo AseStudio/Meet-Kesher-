@@ -24,7 +24,12 @@ const VOLUME_THRESHOLD = 10;
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
-  const { scale, isTablet, isDesktop } = useResponsive();
+  const { scale, isTablet, isDesktop, width, height } = useResponsive();
+  // Portrait phone — toolbar moves from the right-edge vertical strip to a
+  // bottom horizontal bar so it doesn't eat a big vertical slice of a
+  // narrow screen. Everything else (attendee strip, top bar, etc.) is
+  // unaffected by this and keeps its existing layout.
+  const isPortraitPhone = !isTablet && height > width;
   const styles = useSessionMainStyles(scale);
 
   // Video states
@@ -1320,8 +1325,15 @@ function getProfileKey(uplink = 0, downlink = 0) {
           </View>
         )}
 
-        {/* Toolbar */}
-        <ScrollView style={styles.toolbarScroll} contentContainerStyle={styles.toolbar} showsVerticalScrollIndicator={false}>
+        {/* Toolbar — vertical strip on the right edge in landscape,
+            horizontal bar along the bottom in portrait. */}
+        <ScrollView
+          horizontal={isPortraitPhone}
+          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
+          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+        >
           {tools.map((tool, i) => (
             <TouchableOpacity
               key={i}
@@ -1707,7 +1719,12 @@ function useSessionMainStyles(scale) {
     position: 'absolute', top: 0, bottom: 0, right: 0, zIndex: 40,
     width: scale(62), backgroundColor: 'rgba(13,13,43,0.55)',
   },
+  toolbarScrollHorizontal: {
+    top: undefined, bottom: 0, left: 0, right: 0,
+    width: '100%', height: scale(80),
+  },
   toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
+  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
   toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.15)' },
