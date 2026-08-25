@@ -22,14 +22,16 @@ const SPEAKER_SWITCH_DELAY = 600;
 // Volume threshold (0-100) — below this is considered silence
 const VOLUME_THRESHOLD = 10;
 
+// Toolbar now always docks along the bottom of the screen, in every
+// orientation and at every size — see the sizing block right before the
+// `tools` array below for how button size/spacing adapt to fit.
+const TOOLBAR_MIN_BTN = 34;
+const TOOLBAR_MAX_BTN = 54;
+const TOOLBAR_H_PADDING = 20; // total horizontal inset the bar reserves
+
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
   const { scale, isTablet, isDesktop, width, height } = useResponsive();
-  // Portrait phone — toolbar moves from the right-edge vertical strip to a
-  // bottom horizontal bar so it doesn't eat a big vertical slice of a
-  // narrow screen. Everything else (attendee strip, top bar, etc.) is
-  // unaffected by this and keeps its existing layout.
-  const isPortraitPhone = !isTablet && height > width;
   const styles = useSessionMainStyles(scale);
 
   // Video states
@@ -1001,7 +1003,26 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'power-outline', label: 'End', action: endSession, end: true },
   ];
 
-
+  // Button size shrinks to whatever fits ALL tools on one row with no
+  // scrolling — driven purely by screen width and tool count, not
+  // orientation. `justifyContent: 'space-between'` on the row (see
+  // styles.toolbar) then does the orientation-dependent part for free:
+  // whatever width is left over after N fixed-size buttons gets divided
+  // into the gaps between them, so a wide landscape screen naturally
+  // spreads the buttons out and a narrow portrait screen naturally pulls
+  // them close — no separate gap calculation needed.
+  const toolBtnSize = Math.round(
+    Math.min(TOOLBAR_MAX_BTN, Math.max(TOOLBAR_MIN_BTN, ((width - TOOLBAR_H_PADDING) / tools.length) * 0.74))
+  );
+  // Below this size the label text just gets squished into an unreadable
+  // smear — better to drop it and keep the icon legible.
+  const toolShowLabel = toolBtnSize >= 44;
+  const toolIconSize = Math.max(14, Math.round(toolBtnSize * 0.36));
+  // Actual height of the bottom toolbar bar (buttons + their vertical
+  // padding) — anything else anchored to the bottom edge (view toggle,
+  // interrupt button, self-view PiP) needs to clear this so it doesn't
+  // end up sitting under the toolbar the same way the strip/title did.
+  const toolbarBarHeight = toolBtnSize + 16;
 
   return (
     <View style={styles.container}>
@@ -1197,7 +1218,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             {/* Interrupt — only relevant once someone has actually been
                 called up (otherwise the host is already the one drawing). */}
             {callInProgress && (
-              <View style={[styles.interruptBar, { pointerEvents: 'box-none' }]}>
+              <View style={[styles.interruptBar, { pointerEvents: 'box-none', bottom: toolbarBarHeight + 10 }]}>
                 <TouchableOpacity
                   style={[styles.interruptBtn, hostInterrupting && styles.interruptBtnActive]}
                   onPress={toggleInterrupt}
@@ -1298,7 +1319,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
                 {/* PiP — host's self-view when NOT on main */}
                 {showPiP && (
-                  <View style={styles.pipContainer}>
+                  <View style={[styles.pipContainer, { bottom: toolbarBarHeight + 10 }]}>
                     <VideoTile
                       track={localVideoTrack}
                       cameraOff={cameraOff}
@@ -1314,7 +1335,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             )}
 
             {/* View Toggle */}
-            <View style={styles.viewToggle}>
+            <View style={[styles.viewToggle, { bottom: toolbarBarHeight + 10 }]}>
               <TouchableOpacity style={[styles.viewBtn, view === 'speaker' && styles.viewBtnActive]} onPress={() => setView('speaker')}>
                 <Text style={styles.viewBtnText}>Speaker</Text>
               </TouchableOpacity>
@@ -1325,31 +1346,35 @@ function getProfileKey(uplink = 0, downlink = 0) {
           </View>
         )}
 
-        {/* Toolbar — vertical strip on the right edge in landscape,
-            horizontal bar along the bottom in portrait. */}
-        <ScrollView
-          horizontal={isPortraitPhone}
-          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
-          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
-          showsVerticalScrollIndicator={false}
-          showsHorizontalScrollIndicator={false}
-        >
-          {tools.map((tool, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[styles.toolBtn, tool.active && styles.toolBtnActive, tool.red && styles.toolBtnRed, tool.end && styles.toolBtnEnd]}
-              onPress={tool.action}
-            >
-              <Ionicons name={tool.icon} size={18} color={colors.white} />
-              <Text style={styles.toolLabel}>{tool.label}</Text>
-              {!!tool.badge && (
-                <View style={styles.toolBadge}>
-                  <Text style={styles.toolBadgeText}>{tool.badge > 9 ? '9+' : tool.badge}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Toolbar — always a bottom bar, never scrolls. Button size is
+            computed above from screen width so the whole row always fits;
+            `space-between` below turns the leftover width into gaps that
+            grow in landscape and shrink in portrait automatically. */}
+        <View style={styles.toolbarScroll}>
+          <View style={styles.toolbar}>
+            {tools.map((tool, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[
+                  styles.toolBtn,
+                  { width: toolBtnSize, height: toolBtnSize },
+                  tool.active && styles.toolBtnActive,
+                  tool.red && styles.toolBtnRed,
+                  tool.end && styles.toolBtnEnd,
+                ]}
+                onPress={tool.action}
+              >
+                <Ionicons name={tool.icon} size={toolIconSize} color={colors.white} />
+                {toolShowLabel && <Text style={styles.toolLabel}>{tool.label}</Text>}
+                {!!tool.badge && (
+                  <View style={styles.toolBadge}>
+                    <Text style={styles.toolBadgeText}>{tool.badge > 9 ? '9+' : tool.badge}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       </View>
 
       {/* Board Picker Modal */}
@@ -1618,8 +1643,11 @@ function useSessionMainStyles(scale) {
   mainContent: { ...StyleSheet.absoluteFillObject, flexDirection: 'row' },
 
   // ── ATTENDEE STRIP ──
+  // top/bottom inset so this rail starts below the floating topBar and
+  // stops above the floating bottom toolbar instead of running underneath
+  // either of them (same overlap issue as the toolbar, fixed the same way).
   attendeeStrip: {
-    position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 40,
+    position: 'absolute', top: 78, bottom: scale(78), left: 0, zIndex: 40,
     width: scale(104), backgroundColor: 'rgba(13,13,43,0.55)', paddingVertical: 6,
   },
   stripContent: { alignItems: 'center', gap: 10, paddingBottom: 8 },
@@ -1715,17 +1743,19 @@ function useSessionMainStyles(scale) {
   interruptBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
 
   // ── TOOLBAR ──
+  // Always a full-width bar docked to the bottom — no more vertical-rail
+  // variant, so orientation only affects the gaps `toolbar` distributes
+  // (via space-between), not which edge the bar lives on.
   toolbarScroll: {
-    position: 'absolute', top: 0, bottom: 0, right: 0, zIndex: 40,
-    width: scale(62), backgroundColor: 'rgba(13,13,43,0.55)',
+    position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 40,
+    paddingVertical: 8, backgroundColor: 'rgba(13,13,43,0.55)',
   },
-  toolbarScrollHorizontal: {
-    top: undefined, bottom: 0, left: 0, right: 0,
-    width: '100%', height: scale(80),
+  toolbar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: TOOLBAR_H_PADDING / 2,
   },
-  toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
-  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
-  toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  // width/height are set inline per-button from the computed toolBtnSize.
+  toolBtn: { borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.15)' },
   toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginTop: 4 },
