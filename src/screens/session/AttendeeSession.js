@@ -43,16 +43,16 @@ export default function AttendeeSession({ navigation, route }) {
   // Attendee strip visibility — hidden by default, appears on tap, and
   // auto-hides again after a few seconds of no interaction, same as the
   // host screen.
-  const [stripVisible, setStripVisible] = useState(false);
-  const stripHideTimerRef = useRef(null);
-  const revealStrip = () => {
-    setStripVisible(true);
-    if (stripHideTimerRef.current) clearTimeout(stripHideTimerRef.current);
-    stripHideTimerRef.current = setTimeout(() => setStripVisible(false), 3000);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const controlsHideTimerRef = useRef(null);
+  const revealControls = () => {
+    setControlsVisible(true);
+    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+    controlsHideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
   };
   useEffect(() => {
     return () => {
-      if (stripHideTimerRef.current) clearTimeout(stripHideTimerRef.current);
+      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
   }, []);
 
@@ -782,6 +782,7 @@ export default function AttendeeSession({ navigation, route }) {
       <NotificationToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Top Bar */}
+      {controlsVisible && (
       <View style={styles.topBar}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
@@ -809,6 +810,7 @@ export default function AttendeeSession({ navigation, route }) {
           </View>
         </View>
       </View>
+      )}
 
       {/* Call to Board */}
       {showCallToBoard && !calledToBoard && (
@@ -848,8 +850,8 @@ export default function AttendeeSession({ navigation, route }) {
         {/* ─── STRIP — host and other remote users. Hidden by default;
             tapping the video/board area reveals it for a few seconds,
             and touching the strip itself resets that timer. ─── */}
-        {stripVisible && (
-        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealStrip}>
+        {controlsVisible && (
+        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealControls}>
           <ScrollView
             horizontal={isPortraitPhone}
             showsVerticalScrollIndicator={false}
@@ -915,7 +917,7 @@ export default function AttendeeSession({ navigation, route }) {
         )}
 
         {/* ─── MAIN VIEW ─── */}
-        <View style={styles.speakerView} onTouchStart={revealStrip}>
+        <View style={styles.speakerView} onTouchStart={revealControls}>
           {boardMode ? (
             // Embedded board — same shared components the host uses.
             // View-only until the host calls this attendee up and they accept.
@@ -1064,7 +1066,7 @@ export default function AttendeeSession({ navigation, route }) {
           )}
 
           {/* View Toggle */}
-          {!boardMode && (
+          {!boardMode && controlsVisible && (
             <View style={[styles.viewToggle, { bottom: toolbarBarHeight + 10 }]}>
               <TouchableOpacity style={[styles.viewBtn, view === 'speaker' && styles.viewBtnActive]} onPress={() => setView('speaker')}>
                 <Text style={styles.viewBtnText}>Speaker</Text>
@@ -1077,7 +1079,9 @@ export default function AttendeeSession({ navigation, route }) {
         </View>
 
         {/* Attendee Toolbar — always a bottom bar (see toolBtnSize above
-            for how it shrinks to fit all 9 buttons with no scrolling). */}
+            for how it shrinks to fit all 9 buttons with no scrolling).
+            Hidden until controlsVisible, same as the rest of the chrome. */}
+        {controlsVisible && (
         <View style={styles.toolbarScroll}>
           <View style={styles.toolbar}>
             <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, muted && styles.toolBtnMuted]} onPress={toggleMic}>
@@ -1128,6 +1132,7 @@ export default function AttendeeSession({ navigation, route }) {
             </TouchableOpacity>
           </View>
         </View>
+        )}
       </View>
 
       {/* Reactions Modal */}

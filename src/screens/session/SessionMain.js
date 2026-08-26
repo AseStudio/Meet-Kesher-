@@ -49,16 +49,16 @@ export default function SessionMain({ navigation, route }) {
   // Attendee strip visibility — hidden by default, appears on tap, and
   // auto-hides again after a few seconds of no interaction so it doesn't
   // permanently sit over the video.
-  const [stripVisible, setStripVisible] = useState(false);
-  const stripHideTimerRef = useRef(null);
-  const revealStrip = () => {
-    setStripVisible(true);
-    if (stripHideTimerRef.current) clearTimeout(stripHideTimerRef.current);
-    stripHideTimerRef.current = setTimeout(() => setStripVisible(false), 3000);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const controlsHideTimerRef = useRef(null);
+  const revealControls = () => {
+    setControlsVisible(true);
+    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+    controlsHideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
   };
   useEffect(() => {
     return () => {
-      if (stripHideTimerRef.current) clearTimeout(stripHideTimerRef.current);
+      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
   }, []);
 
@@ -1045,6 +1045,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
       <NotificationToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Top Bar */}
+      {controlsVisible && (
       <View style={styles.topBar}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
@@ -1067,12 +1068,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
           </View>
         </View>
       </View>
+      )}
 
       {/* Signals bar — raised hands / corrections / speak requests. Sits
           above mainContent so it's visible in board mode and video mode
           alike, not nested inside either branch. Tap a chip to dismiss it
           for everyone (see clearAttendeeSignal). */}
-      {Object.keys(attendeeSignals).length > 0 && (
+      {controlsVisible && Object.keys(attendeeSignals).length > 0 && (
         <View style={styles.signalsBar}>
           {Object.entries(attendeeSignals).map(([uid, info]) => (
             <TouchableOpacity key={uid} style={styles.signalChip} onPress={() => clearAttendeeSignal(uid)}>
@@ -1090,8 +1092,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
             anywhere in the video/board area (see the wrapper below) shows
             it for a few seconds. Touching the strip itself resets that
             timer so it doesn't vanish mid-interaction. ─── */}
-        {stripVisible && (
-        <View style={styles.attendeeStrip} onTouchStart={revealStrip}>
+        {controlsVisible && (
+        <View style={styles.attendeeStrip} onTouchStart={revealControls}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
             {remoteUsers.map((user, i) => {
               // This user's track is already playing full-size (speaker
@@ -1161,7 +1163,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
         {/* ─── CENTER — Board OR Video ─── */}
         {boardMode ? (
 
-          <View style={styles.boardMainArea} onTouchStart={revealStrip}>
+          <View style={styles.boardMainArea} onTouchStart={revealControls}>
             {/* Waiting for an invited attendee to respond — board is open
                 (host opened it directly or a previous call is active) but
                 this particular invite hasn't resolved yet. */}
@@ -1256,7 +1258,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
         ) : (
 
           // ─── VIDEO MODE ───
-          <View style={styles.speakerView} onTouchStart={revealStrip}>
+          <View style={styles.speakerView} onTouchStart={revealControls}>
             {view === 'gallery' ? (
               <ScrollView
                 style={{ flex: 1 }}
@@ -1359,6 +1361,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             )}
 
             {/* View Toggle */}
+            {controlsVisible && (
             <View style={[styles.viewToggle, { bottom: toolbarBarHeight + 10 }]}>
               <TouchableOpacity style={[styles.viewBtn, view === 'speaker' && styles.viewBtnActive]} onPress={() => setView('speaker')}>
                 <Text style={styles.viewBtnText}>Speaker</Text>
@@ -1367,13 +1370,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 <Text style={styles.viewBtnText}>Gallery</Text>
               </TouchableOpacity>
             </View>
+            )}
           </View>
         )}
 
         {/* Toolbar — always a bottom bar, never scrolls. Button size is
             computed above from screen width so the whole row always fits;
             `space-between` below turns the leftover width into gaps that
-            grow in landscape and shrink in portrait automatically. */}
+            grow in landscape and shrink in portrait automatically. Hidden
+            until controlsVisible, same as the rest of the chrome. */}
+        {controlsVisible && (
         <View style={styles.toolbarScroll}>
           <View style={styles.toolbar}>
             {tools.map((tool, i) => (
@@ -1399,6 +1405,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             ))}
           </View>
         </View>
+        )}
       </View>
 
       {/* Board Picker Modal */}
