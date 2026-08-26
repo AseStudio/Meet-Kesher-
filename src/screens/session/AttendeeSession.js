@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Modal, Alert, Platform
+  ScrollView, Modal, Alert, Platform, Pressable
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -18,27 +18,34 @@ import { useResponsive } from '../../lib/responsive';
 const SPEAKER_SWITCH_DELAY = 600;
 const VOLUME_THRESHOLD = 10;
 
-// Toolbar always docks along the bottom now (see SessionMain.js for the
-// host-side twin of this) — button size is computed from screen width so
-// all 9 buttons fit one row with no scrolling, ever.
-const TOOL_COUNT = 9; // Mute, Cam, React, Hand, Correct, Speak, Chat, Poll, Leave
-const TOOLBAR_MIN_BTN = 34;
-const TOOLBAR_MAX_BTN = 54;
-const TOOLBAR_H_PADDING = 20;
-
 export default function AttendeeSession({ navigation, route }) {
   const session = route.params?.session;
   const { scale, isTablet, isDesktop, width, height } = useResponsive();
-  // Still used for the attendee strip (left rail vs. top bar) — only the
-  // toolbar itself no longer varies by orientation.
   const isPortraitPhone = !isTablet && height > width;
   const styles = useAttendeeSessionStyles(scale);
-  const toolBtnSize = Math.round(
-    Math.min(TOOLBAR_MAX_BTN, Math.max(TOOLBAR_MIN_BTN, ((width - TOOLBAR_H_PADDING) / TOOL_COUNT) * 0.74))
-  );
-  const toolShowLabel = toolBtnSize >= 44;
-  const toolIconSize = Math.max(14, Math.round(toolBtnSize * 0.36));
-  const toolbarBarHeight = toolBtnSize + 16;
+
+  // Tap-to-reveal controls: chrome (top bar, strip, toolbar, badges) hides
+  // after a few seconds of inactivity so the video can go truly full
+  // screen, and reappears on tap. Actual video content (main video, PiPs)
+  // is never hidden by this — only the interactive chrome.
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideControlsTimerRef = useRef(null);
+
+  const scheduleHideControls = () => {
+    if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
+    hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), 4000);
+  };
+
+  const showControls = () => {
+    setControlsVisible(true);
+    scheduleHideControls();
+  };
+
+  useEffect(() => {
+    scheduleHideControls();
+    return () => { if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current); };
+  }, []);
+
   // Host-configured defaults from CreateSession — falls back to the
   // previous hardcoded behavior (muted, camera off) if this session
   // predates these columns or they were never set.
@@ -765,6 +772,7 @@ export default function AttendeeSession({ navigation, route }) {
       <NotificationToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Top Bar */}
+      {controlsVisible && (
       <View style={styles.topBar}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
@@ -792,6 +800,7 @@ export default function AttendeeSession({ navigation, route }) {
           </View>
         </View>
       </View>
+      )}
 
       {/* Call to Board */}
       {showCallToBoard && !calledToBoard && (
@@ -826,9 +835,10 @@ export default function AttendeeSession({ navigation, route }) {
         </View>
       )}
 
-      <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
+      <Pressable style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]} onPress={showControls}>
 
         {/* ─── STRIP — host and other remote users ─── */}
+        {controlsVisible && (
         <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]}>
           <ScrollView
             horizontal={isPortraitPhone}
@@ -892,6 +902,7 @@ export default function AttendeeSession({ navigation, route }) {
             })}
           </ScrollView>
         </View>
+        )}
 
         {/* ─── MAIN VIEW ─── */}
         <View style={styles.speakerView}>
@@ -1021,7 +1032,7 @@ export default function AttendeeSession({ navigation, route }) {
 
               {/* PiP — show attendee's self-view when NOT on main */}
               {showPiP && (
-                <View style={[styles.pipContainer, { bottom: toolbarBarHeight + 10 }]}>
+                <View style={styles.pipContainer}>
                   <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={13} mirror={true} />
                 </View>
               )}
@@ -1040,8 +1051,8 @@ export default function AttendeeSession({ navigation, route }) {
           )}
 
           {/* View Toggle */}
-          {!boardMode && (
-            <View style={[styles.viewToggle, { bottom: toolbarBarHeight + 10 }]}>
+          {!boardMode && controlsVisible && (
+            <View style={styles.viewToggle}>
               <TouchableOpacity style={[styles.viewBtn, view === 'speaker' && styles.viewBtnActive]} onPress={() => setView('speaker')}>
                 <Text style={styles.viewBtnText}>Speaker</Text>
               </TouchableOpacity>
@@ -1052,59 +1063,64 @@ export default function AttendeeSession({ navigation, route }) {
           )}
         </View>
 
-        {/* Attendee Toolbar — always a bottom bar (see toolBtnSize above
-            for how it shrinks to fit all 9 buttons with no scrolling). */}
-        <View style={styles.toolbarScroll}>
-          <View style={styles.toolbar}>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, muted && styles.toolBtnMuted]} onPress={toggleMic}>
-              <Ionicons name={muted ? 'mic-off-outline' : 'mic-outline'} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>{muted ? 'Unmute' : 'Mute'}</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, cameraOff && styles.toolBtnMuted]} onPress={toggleCamera}>
-              <Ionicons name={cameraOff ? 'videocam-off-outline' : 'videocam-outline'} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>{cameraOff ? 'Cam Off' : 'Cam On'}</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={() => setShowReactions(true)}>
-              <Ionicons name="happy-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>React</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'hand' && styles.toolBtnActive]} onPress={() => sendSignal('hand')}>
-              <Ionicons name={SIGNAL_ICON.hand} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Hand</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'correction' && styles.toolBtnRed]} onPress={() => sendSignal('correction')}>
-              <Ionicons name={SIGNAL_ICON.correction} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Correct</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'speak' && styles.toolBtnActive]} onPress={() => sendSignal('speak')}>
-              <Ionicons name={SIGNAL_ICON.speak} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Speak</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openChat}>
-              <Ionicons name="chatbubble-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Chat</Text>}
-              {!!unreadCount && (
-                <View style={styles.toolBadge}>
-                  <Text style={styles.toolBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openPoll}>
-              <Ionicons name="stats-chart-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Poll</Text>}
-              {!!pollNotice && (
-                <View style={styles.toolBadge}>
-                  <Text style={styles.toolBadgeText}>!</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, styles.toolBtnEnd]} onPress={handleLeave}>
-              <Ionicons name="exit-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Leave</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+        {/* Attendee Toolbar */}
+        {controlsVisible && (
+        <ScrollView
+          horizontal={isPortraitPhone}
+          style={[styles.toolbarScroll, isPortraitPhone && styles.toolbarScrollHorizontal]}
+          contentContainerStyle={isPortraitPhone ? styles.toolbarHorizontal : styles.toolbar}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+        >
+          <TouchableOpacity style={[styles.toolBtn, muted && styles.toolBtnMuted]} onPress={toggleMic}>
+            <Ionicons name={muted ? 'mic-off-outline' : 'mic-outline'} size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, cameraOff && styles.toolBtnMuted]} onPress={toggleCamera}>
+            <Ionicons name={cameraOff ? 'videocam-off-outline' : 'videocam-outline'} size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>{cameraOff ? 'Cam Off' : 'Cam On'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.toolBtn} onPress={() => setShowReactions(true)}>
+            <Ionicons name="happy-outline" size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>React</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, activeSignal === 'hand' && styles.toolBtnActive]} onPress={() => sendSignal('hand')}>
+            <Ionicons name={SIGNAL_ICON.hand} size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Hand</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, activeSignal === 'correction' && styles.toolBtnRed]} onPress={() => sendSignal('correction')}>
+            <Ionicons name={SIGNAL_ICON.correction} size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Correct</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, activeSignal === 'speak' && styles.toolBtnActive]} onPress={() => sendSignal('speak')}>
+            <Ionicons name={SIGNAL_ICON.speak} size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Speak</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.toolBtn} onPress={openChat}>
+            <Ionicons name="chatbubble-outline" size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Chat</Text>
+            {!!unreadCount && (
+              <View style={styles.toolBadge}>
+                <Text style={styles.toolBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.toolBtn} onPress={openPoll}>
+            <Ionicons name="stats-chart-outline" size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Poll</Text>
+            {!!pollNotice && (
+              <View style={styles.toolBadge}>
+                <Text style={styles.toolBadgeText}>!</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, styles.toolBtnEnd]} onPress={handleLeave}>
+            <Ionicons name="exit-outline" size={18} color={colors.white} />
+            <Text style={styles.toolLabel}>Leave</Text>
+          </TouchableOpacity>
+        </ScrollView>
+        )}
+      </Pressable>
 
       {/* Reactions Modal */}
       <Modal visible={showReactions} transparent animationType="slide" onRequestClose={() => setShowReactions(false)}>
@@ -1200,15 +1216,12 @@ function useAttendeeSessionStyles(scale) {
   mainContentPortrait: {}, // orientation now only affects the strip/toolbar overlays below, not layout flow
 
   // ── STRIP — compact for attendee screen ──
-  // top/bottom cleared so it starts below the floating topBar and stops
-  // above the (now always-present) bottom toolbar bar, in both the
-  // vertical-rail and horizontal-bar layouts below.
   attendeeStrip: {
-    position: 'absolute', top: 78, bottom: scale(78), left: 0, zIndex: 40,
+    position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 40,
     width: scale(80), backgroundColor: 'rgba(13,13,43,0.55)', paddingVertical: 6,
   },
   attendeeStripHorizontal: {
-    top: 78, bottom: undefined, left: 0, right: 0,
+    top: 0, bottom: undefined, left: 0, right: 0,
     width: '100%', height: scale(92), paddingVertical: 0, paddingHorizontal: 6,
   },
   stripContent: { alignItems: 'center', gap: 8, paddingBottom: 8 },
@@ -1277,23 +1290,21 @@ function useAttendeeSessionStyles(scale) {
   viewBtnText: { color: colors.white, fontSize: 11, fontWeight: '600' },
   signalBadge: { position: 'absolute', top: 78, alignSelf: 'center', zIndex: 59, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(91,46,255,0.8)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 },
   signalBadgeText: { color: colors.white, fontSize: 12, fontWeight: '600' },
-  // Always a full-width bottom bar now — see toolBtnSize in the component
-  // for how button size (and therefore the bar's own height) adapts.
   toolbarScroll: {
-    position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 40,
-    paddingVertical: 8, backgroundColor: 'rgba(13,13,43,0.55)',
+    position: 'absolute', top: 0, bottom: 0, right: 0, zIndex: 40,
+    width: scale(62), backgroundColor: 'rgba(13,13,43,0.55)',
   },
-  toolbar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: TOOLBAR_H_PADDING / 2,
+  toolbarScrollHorizontal: {
+    top: undefined, bottom: 0, left: 0, right: 0,
+    width: '100%', height: scale(80),
   },
-  toolBtn: { borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  toolbar: { paddingVertical: 8, alignItems: 'center', gap: 4 },
+  toolbarHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
+  toolBtn: { width: scale(50), height: scale(50), borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
   toolBtnMuted: { backgroundColor: 'rgba(255,59,59,0.2)' },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.3)' },
-  // marginLeft (not marginTop) now that the toolbar is always a row —
-  // still reads as "set apart from the rest" via the small extra gap.
-  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginLeft: 8 },
+  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginTop: 8 },
   toolLabel: { fontSize: 7, color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
   toolBadge: {
     position: 'absolute',
