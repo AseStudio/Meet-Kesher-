@@ -20,17 +20,46 @@ export function createAgoraSession(handlers = {}) {
 
   const createClient = () => AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
-  const createLocalTracks = async () => {
+  // Split into two independent calls (instead of the old single
+  // createMicrophoneAndCameraTracks) so a denied/slow mic permission
+  // doesn't also null out an already-granted camera, or vice versa.
+  //
+  // WHY THESE ARE CALLED LAZILY FROM ensureAudioTrack/ensureVideoTrack
+  // BELOW, NOT JUST ONCE FROM join():
+  // getUserMedia only prompts once per permission per origin. If the
+  // attendee ignores or dismisses that first prompt (or it's just slow),
+  // this used to fail once at join() and localAudioTrack/localVideoTrack
+  // stayed null forever — even after the attendee later granted the
+  // permission from the browser's own UI. publishAudio()/publishVideo()
+  // and setAudioEnabled/setVideoEnabled(true) now call ensureAudioTrack/
+  // ensureVideoTrack instead of reading the closure variable directly, so
+  // every retry (e.g. the attendee tapping the mic button again) makes a
+  // fresh getUserMedia call — which resolves immediately with no prompt
+  // if permission has since been granted, instead of being permanently
+  // stuck on the first failure.
+  const createAudioTrack = async () => {
     try {
-      const tracks = await AgoraRTC.createMicrophoneAndCameraTracks(
-        { echoCancellation: true, noiseSuppression: true },
-        { encoderConfig: '360p_7' }
-      );
-      return tracks; // [audioTrack, videoTrack]
+      return await AgoraRTC.createMicrophoneAudioTrack({ echoCancellation: true, noiseSuppression: true });
     } catch (err) {
-      console.error('Failed to create local tracks:', err);
-      return [null, null];
+      console.error('Failed to create local audio track (mic permission?):', err.message);
+      return null;
     }
+  };
+  const createVideoTrack = async () => {
+    try {
+      return await AgoraRTC.createCameraVideoTrack({ encoderConfig: '360p_7' });
+    } catch (err) {
+      console.error('Failed to create local video track (camera permission?):', err.message);
+      return null;
+    }
+  };
+  const ensureAudioTrack = async () => {
+    if (!localAudioTrack) localAudioTrack = await createAudioTrack();
+    return localAudioTrack;
+  };
+  const ensureVideoTrack = async () => {
+    if (!localVideoTrack) localVideoTrack = await createVideoTrack();
+    return localVideoTrack;
   };
 
   return {
@@ -68,44 +97,58 @@ export function createAgoraSession(handlers = {}) {
       const assignedUid = await client.join(appId, channel, token || null, uid ?? null);
       client.enableAudioVolumeIndicator();
 
-      const [audioTrack, videoTrack] = await createLocalTracks();
-      localAudioTrack = audioTrack;
-      localVideoTrack = videoTrack;
+      // Best-effort attempt at join time — if the attendee hasn't
+      // answered the permission prompt yet (or denied it), these come
+      // back null and publishAudio()/publishVideo() retry them lazily
+      // later via ensureAudioTrack/ensureVideoTrack above. Run together
+      // (not sequentially) so this isn't slower than the old combined call.
+      [localAudioTrack, localVideoTrack] = await Promise.all([createAudioTrack(), createVideoTrack()]);
       // Start disabled — matches the original "never publish a track
       // you're about to immediately disable" fix. Callers publish
       // explicitly via publishAudio()/publishVideo().
-      await audioTrack?.setEnabled(false);
-      await videoTrack?.setEnabled(false);
+      await localAudioTrack?.setEnabled(false);
+      await localVideoTrack?.setEnabled(false);
 
       return assignedUid;
     },
 
     async publishAudio() {
-      if (!localAudioTrack || audioPublished) return;
-      await localAudioTrack.setEnabled(true);
-      await client.publish([localAudioTrack]);
+      if (audioPublished) return;
+      const track = await ensureAudioTrack();
+      if (!track) return; // still no mic permission — next retry tries again
+      await track.setEnabled(true);
+      await client.publish([track]);
       audioPublished = true;
     },
 
     async publishVideo() {
-      if (!localVideoTrack || videoPublished) return;
-      await localVideoTrack.setEnabled(true);
-      await client.publish([localVideoTrack]);
+      if (videoPublished) return;
+      const track = await ensureVideoTrack();
+      if (!track) return; // still no camera permission — next retry tries again
+      await track.setEnabled(true);
+      await client.publish([track]);
       videoPublished = true;
       try {
-        await localVideoTrack.setEncoderConfiguration(VIDEO_PROFILES.ultra);
+        await track.setEncoderConfiguration(VIDEO_PROFILES.ultra);
       } catch (e) {}
     },
 
     async setAudioEnabled(enabled) {
-      if (!localAudioTrack) return;
+      // The original bug: this checked `!localAudioTrack` FIRST and bailed
+      // before ever reaching the "not yet published, go create+publish"
+      // branch below — so a denied/delayed mic permission at join() meant
+      // every future "unmute" tap was a silent no-op forever, even after
+      // the attendee later granted the permission. Checking the publish
+      // branch first means an enable always retries track creation via
+      // publishAudio() when we don't have a track yet.
       if (enabled && !audioPublished) return this.publishAudio();
+      if (!localAudioTrack) return; // never got a track — nothing to toggle
       await localAudioTrack.setEnabled(enabled);
     },
 
     async setVideoEnabled(enabled) {
-      if (!localVideoTrack) return;
       if (enabled && !videoPublished) return this.publishVideo();
+      if (!localVideoTrack) return;
       await localVideoTrack.setEnabled(enabled);
     },
 

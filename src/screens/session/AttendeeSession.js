@@ -40,10 +40,9 @@ export default function AttendeeSession({ navigation, route }) {
   const toolIconSize = Math.max(14, Math.round(toolBtnSize * 0.36));
   const toolbarBarHeight = toolBtnSize + 16;
 
-  // Attendee strip visibility — hidden by default, appears on tap, and
-  // auto-hides again after a few seconds of no interaction, same as the
-  // host screen.
-  const [controlsVisible, setControlsVisible] = useState(false);
+  // Attendee strip visibility — visible on load, then auto-hides after a
+  // few seconds of no interaction, same as the host screen.
+  const [controlsVisible, setControlsVisible] = useState(true);
   const controlsHideTimerRef = useRef(null);
   const revealControls = () => {
     setControlsVisible(true);
@@ -51,10 +50,16 @@ export default function AttendeeSession({ navigation, route }) {
     controlsHideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
   };
   useEffect(() => {
+    // Arms the initial 3s countdown — without this, controls that start
+    // visible would never hide until the first tap/mouse-move.
+    revealControls();
     return () => {
       if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
   }, []);
+  // PCs/trackpads never fire onTouchStart — mouse movement is the desktop
+  // equivalent of a tap here. No-op on native.
+  const revealOnHoverProps = Platform.OS === 'web' ? { onMouseMove: revealControls } : {};
 
   // Host-configured defaults from CreateSession — falls back to the
   // previous hardcoded behavior (muted, camera off) if this session
@@ -783,7 +788,7 @@ export default function AttendeeSession({ navigation, route }) {
 
       {/* Top Bar */}
       {controlsVisible && (
-      <View style={styles.topBar}>
+      <View style={styles.topBar} {...revealOnHoverProps}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
@@ -851,7 +856,7 @@ export default function AttendeeSession({ navigation, route }) {
             tapping the video/board area reveals it for a few seconds,
             and touching the strip itself resets that timer. ─── */}
         {controlsVisible && (
-        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealControls}>
+        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealControls} {...revealOnHoverProps}>
           <ScrollView
             horizontal={isPortraitPhone}
             showsVerticalScrollIndicator={false}
@@ -917,7 +922,7 @@ export default function AttendeeSession({ navigation, route }) {
         )}
 
         {/* ─── MAIN VIEW ─── */}
-        <View style={styles.speakerView} onTouchStart={revealControls}>
+        <View style={styles.speakerView} onTouchStart={revealControls} {...revealOnHoverProps}>
           {boardMode ? (
             // Embedded board — same shared components the host uses.
             // View-only until the host calls this attendee up and they accept.
@@ -1082,7 +1087,7 @@ export default function AttendeeSession({ navigation, route }) {
             for how it shrinks to fit all 9 buttons with no scrolling).
             Hidden until controlsVisible, same as the rest of the chrome. */}
         {controlsVisible && (
-        <View style={styles.toolbarScroll}>
+        <View style={styles.toolbarScroll} {...revealOnHoverProps}>
           <View style={styles.toolbar}>
             <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, muted && styles.toolBtnMuted]} onPress={toggleMic}>
               <Ionicons name={muted ? 'mic-off-outline' : 'mic-outline'} size={toolIconSize} color={colors.white} />

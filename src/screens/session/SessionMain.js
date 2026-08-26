@@ -46,10 +46,11 @@ export default function SessionMain({ navigation, route }) {
   const [joined, setJoined] = useState(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
 
-  // Attendee strip visibility — hidden by default, appears on tap, and
-  // auto-hides again after a few seconds of no interaction so it doesn't
-  // permanently sit over the video.
-  const [controlsVisible, setControlsVisible] = useState(false);
+  // Attendee strip visibility — visible on load (so there's something to
+  // see/tap before anyone knows to move the mouse or touch the screen),
+  // then auto-hides after a few seconds of no interaction, and comes back
+  // on tap/hover.
+  const [controlsVisible, setControlsVisible] = useState(true);
   const controlsHideTimerRef = useRef(null);
   const revealControls = () => {
     setControlsVisible(true);
@@ -57,10 +58,21 @@ export default function SessionMain({ navigation, route }) {
     controlsHideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
   };
   useEffect(() => {
+    // Starts the initial 3s countdown so the controls that are visible on
+    // load actually hide on schedule — without this they'd stay visible
+    // forever until the first tap/mouse-move, since setting the state to
+    // true above doesn't by itself arm the hide timer.
+    revealControls();
     return () => {
       if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
   }, []);
+  // PCs/trackpads never fire onTouchStart — there's no finger touching
+  // anything — so mouse movement is the desktop equivalent of a tap here,
+  // same as hovering reveals controls on YouTube/Zoom on web. Spread this
+  // alongside onTouchStart on the same elements; it's a no-op on native
+  // (RN ignores the unrecognized prop there).
+  const revealOnHoverProps = Platform.OS === 'web' ? { onMouseMove: revealControls } : {};
 
 function getProfileKey(uplink = 0, downlink = 0) {
   const q = Math.max(uplink, downlink);
@@ -1046,7 +1058,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
       {/* Top Bar */}
       {controlsVisible && (
-      <View style={styles.topBar}>
+      <View style={styles.topBar} {...revealOnHoverProps}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
@@ -1093,7 +1105,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             it for a few seconds. Touching the strip itself resets that
             timer so it doesn't vanish mid-interaction. ─── */}
         {controlsVisible && (
-        <View style={styles.attendeeStrip} onTouchStart={revealControls}>
+        <View style={styles.attendeeStrip} onTouchStart={revealControls} {...revealOnHoverProps}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
             {remoteUsers.map((user, i) => {
               // This user's track is already playing full-size (speaker
@@ -1163,7 +1175,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
         {/* ─── CENTER — Board OR Video ─── */}
         {boardMode ? (
 
-          <View style={styles.boardMainArea} onTouchStart={revealControls}>
+          <View style={styles.boardMainArea} onTouchStart={revealControls} {...revealOnHoverProps}>
             {/* Waiting for an invited attendee to respond — board is open
                 (host opened it directly or a previous call is active) but
                 this particular invite hasn't resolved yet. */}
@@ -1258,7 +1270,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
         ) : (
 
           // ─── VIDEO MODE ───
-          <View style={styles.speakerView} onTouchStart={revealControls}>
+          <View style={styles.speakerView} onTouchStart={revealControls} {...revealOnHoverProps}>
             {view === 'gallery' ? (
               <ScrollView
                 style={{ flex: 1 }}
@@ -1380,7 +1392,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
             grow in landscape and shrink in portrait automatically. Hidden
             until controlsVisible, same as the rest of the chrome. */}
         {controlsVisible && (
-        <View style={styles.toolbarScroll}>
+        <View style={styles.toolbarScroll} {...revealOnHoverProps}>
           <View style={styles.toolbar}>
             {tools.map((tool, i) => (
               <TouchableOpacity
