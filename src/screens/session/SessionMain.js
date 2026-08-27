@@ -1101,10 +1101,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
       <View style={styles.mainContent}>
 
         {/* ─── ATTENDEE STRIP — video cells. Hidden by default; tapping
-            anywhere in the video/board area (see the wrapper below) shows
-            it for a few seconds. Touching the strip itself resets that
-            timer so it doesn't vanish mid-interaction. ─── */}
-        {controlsVisible && (
+            anywhere in the video area (see the wrapper below) shows it
+            for a few seconds. Touching the strip itself resets that
+            timer so it doesn't vanish mid-interaction. Also hidden
+            outright in gallery view (every remote user already has their
+            own tile there) and in board mode (users are already shown in
+            the floating pipStack there, and the strip would otherwise
+            cover the board itself). ─── */}
+        {controlsVisible && !boardMode && view !== 'gallery' && (
         <View style={styles.attendeeStrip} onTouchStart={revealControls} {...revealOnHoverProps}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
             {remoteUsers.map((user, i) => {

@@ -853,9 +853,13 @@ export default function AttendeeSession({ navigation, route }) {
       <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
 
         {/* ─── STRIP — host and other remote users. Hidden by default;
-            tapping the video/board area reveals it for a few seconds,
-            and touching the strip itself resets that timer. ─── */}
-        {controlsVisible && (
+            tapping the video area reveals it for a few seconds, and
+            touching the strip itself resets that timer. Also hidden
+            outright in gallery view (every remote user already has their
+            own tile there) and in board mode (users are already shown in
+            the floating pipStack there, and the strip would otherwise
+            cover the board itself). ─── */}
+        {controlsVisible && !boardMode && view !== 'gallery' && (
         <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealControls} {...revealOnHoverProps}>
           <ScrollView
             horizontal={isPortraitPhone}
