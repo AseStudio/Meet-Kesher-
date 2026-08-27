@@ -14,6 +14,7 @@ import GraphBoardCanvas from '../../components/GraphboardCanvas'; // note: file 
 import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
+import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 
 const SPEAKER_SWITCH_DELAY = 600;
 const VOLUME_THRESHOLD = 10;
@@ -33,6 +34,16 @@ export default function AttendeeSession({ navigation, route }) {
   // toolbar itself no longer varies by orientation.
   const isPortraitPhone = !isTablet && height > width;
   const styles = useAttendeeSessionStyles(scale);
+
+  // If the attendee closes the browser tab instead of tapping Leave, this
+  // registers the leave immediately instead of leaving a stale row that
+  // makes it look like they're still in session.
+  useSessionExitGuard({
+    role: 'attendee',
+    sessionId: session?.id,
+    getUserId: () => currentUserRef.current?.id || null,
+  });
+
   const toolBtnSize = Math.round(
     Math.min(TOOLBAR_MAX_BTN, Math.max(TOOLBAR_MIN_BTN, ((width - TOOLBAR_H_PADDING) / TOOL_COUNT) * 0.74))
   );

@@ -14,6 +14,7 @@ import GraphBoardCanvas from '../../components/GraphboardCanvas';
 import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
+import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 
 const REACTIONS = ['👍', '👏', '❤️', '😂', '🔥', '😮'];
 
@@ -33,6 +34,10 @@ export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
   const { scale, isTablet, isDesktop, width, height } = useResponsive();
   const styles = useSessionMainStyles(scale);
+
+  // If the host closes the browser tab instead of tapping End, this ends
+  // the session immediately so it doesn't keep running as an empty shell.
+  useSessionExitGuard({ role: 'host', sessionId: session?.id });
 
   // Video states
   const [muted, setMuted] = useState(false);
