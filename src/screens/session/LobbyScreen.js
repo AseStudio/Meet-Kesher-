@@ -69,7 +69,7 @@ const GRACE_PERIOD_SECONDS = 5 * 60; // 5 minutes
 // Deliberate hold on the entering-session transition before actually
 // swapping screens, regardless of how fast the session was actually
 // ready — see enterSessionWithTransition below.
-const ENTER_SESSION_DELAY_MS = 10000;
+const ENTER_SESSION_DELAY_MS = 3000;
 
 const getSharedSeconds = (createdAt) => {
   if (!createdAt) return LOBBY_DURATION_SECONDS;
@@ -80,6 +80,11 @@ const getSharedSeconds = (createdAt) => {
 
 export default function LobbyScreen({ navigation, route }) {
   const session = route.params?.session;
+  // Forwarded straight through to AttendeeSession once the session goes
+  // live — without this, a guest arrives with no `guest` param and
+  // AttendeeSession's isGuest check silently defaults to false, sending
+  // them to the same 'AttendeeDashboard' they don't have an account for.
+  const guest = route.params?.guest || null;
 
   const [seconds, setSeconds] = useState(() => getSharedSeconds(session?.created_at));
   const [isHost, setIsHost] = useState(false);
@@ -190,7 +195,10 @@ export default function LobbyScreen({ navigation, route }) {
     setEntering(true);
     if (enteringTimeoutRef.current) clearTimeout(enteringTimeoutRef.current);
     enteringTimeoutRef.current = setTimeout(() => {
-      navigation.navigate(goToHostScreen ? 'SessionMain' : 'AttendeeSession', { session: targetSession });
+      navigation.navigate(
+        goToHostScreen ? 'SessionMain' : 'AttendeeSession',
+        goToHostScreen ? { session: targetSession } : { session: targetSession, guest }
+      );
     }, ENTER_SESSION_DELAY_MS);
   };
 

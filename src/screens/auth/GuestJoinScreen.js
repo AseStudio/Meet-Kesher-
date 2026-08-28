@@ -79,12 +79,15 @@ export default function GuestJoinScreen({ navigation }) {
       // The ONLY thing that gets a guest into the live session is the
       // session's actual status — never the lobby countdown. If it's not
       // 'live' yet (even if the lobby timer has already hit 0 and is just
-      // waiting on the host), they go to the Lobby, same as a signed-in
-      // attendee.
+      // waiting on the host), guests go to their own waiting screen —
+      // not the shared Lobby, which assumes a signed-in Supabase user
+      // (host countdown/cancel controls, music, attendee list — none of
+      // it applies to or works for a guest) and would otherwise send
+      // them to a screen that quietly does nothing for them.
       if (session.status === 'live') {
         navigation.navigate('AttendeeSession', { session, guest });
       } else {
-        navigation.navigate('Lobby', { session, attendee: true, guest });
+        navigation.navigate('GuestWaiting', { session, guest });
       }
     } catch (err) {
       setError(err.message || 'Failed to join session.');

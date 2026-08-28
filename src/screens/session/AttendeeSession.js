@@ -29,6 +29,11 @@ const TOOLBAR_H_PADDING = 20;
 
 export default function AttendeeSession({ navigation, route }) {
   const session = route.params?.session;
+  // Present only for someone who joined via GuestJoinScreen without an
+  // account — {name, email}. Used below so a guest never gets routed to
+  // 'AttendeeDashboard', which doesn't exist for them.
+  const guest = route.params?.guest || null;
+  const isGuest = !!guest;
   const { scale, isTablet, isDesktop, width, height } = useResponsive();
   // Still used for the attendee strip (left rail vs. top bar) — only the
   // toolbar itself no longer varies by orientation.
@@ -262,7 +267,10 @@ export default function AttendeeSession({ navigation, route }) {
         if (payload.userId === currentUserRef.current?.id) {
           leaveAgoraOnly();
           Alert.alert('Removed', 'You have been removed from this session.');
-          navigation.navigate('AttendeeDashboard');
+          // Same guest-safe routing as leaveSession() below — a guest has
+          // no 'AttendeeDashboard' to land on.
+          if (isGuest) navigation.replace('SessionEndedGuest', { session, reason: 'kicked' });
+          else navigation.navigate('AttendeeDashboard');
         }
       })
       .on('broadcast', { event: 'user-identity' }, ({ payload }) => {
@@ -628,7 +636,16 @@ export default function AttendeeSession({ navigation, route }) {
       else Alert.alert('Session ended', 'The host has ended the session.');
     }
 
-    navigation.replace('AttendeeDashboard');
+    // A guest never has an 'AttendeeDashboard' to go back to — they never
+    // signed in, so that screen either 404s or crashes trying to load
+    // account data that doesn't exist. Route them to the guest-safe
+    // landing screen instead, with the two things a guest can actually do
+    // next: make an account, or join another session as a guest again.
+    if (isGuest) {
+      navigation.replace('SessionEndedGuest', { session, reason: forced ? 'ended' : 'left' });
+    } else {
+      navigation.replace('AttendeeDashboard');
+    }
   }
 };
 

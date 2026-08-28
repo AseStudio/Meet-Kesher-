@@ -18,6 +18,7 @@ import BanManagement from './src/screens/host/BanManagement';
 import SubmissionsInbox from './src/screens/host/SubmissionsInbox';
 import SubmitFile from './src/screens/attendee/SubmitFile';
 import LobbyScreen from './src/screens/session/LobbyScreen';
+import GuestWaitingScreen from './src/screens/session/GuestWaitingScreen';
 import SessionMain from './src/screens/session/SessionMain';
 import AttendeeSession from './src/screens/session/AttendeeSession';
 import ChatPanel from './src/screens/session/ChatPanel';
@@ -29,6 +30,7 @@ import PollScreen from './src/screens/session/PollScreen';
 import AgendaPanel from './src/screens/session/AgendaPanel';
 import TimerScreen from './src/screens/session/TimerScreen';
 import EndSession from './src/screens/session/EndSession';
+import SessionEndedGuestScreen from './src/screens/session/SessionEndedGuestScreen';
 import ReactionsPanel from './src/screens/session/ReactionsPanel';
 import CoHostManager from './src/screens/session/CoHostManager';
 import SessionFull from './src/screens/session/SessionFull';
@@ -86,6 +88,7 @@ export default function App() {
           <Stack.Screen name="SubmissionsInbox" component={SubmissionsInbox} />
           <Stack.Screen name="SubmitFile" component={SubmitFile} />
           <Stack.Screen name="Lobby" component={LobbyScreen} />
+          <Stack.Screen name="GuestWaiting" component={GuestWaitingScreen} />
           <Stack.Screen name="SessionMain" component={SessionMain} />
           <Stack.Screen name="AttendeeSession" component={AttendeeSession} />
           <Stack.Screen name="ChatPanel" component={withErrorBoundary(ChatPanel)} options={PANEL_ANIMATION} />
@@ -97,6 +100,7 @@ export default function App() {
           <Stack.Screen name="AgendaPanel" component={AgendaPanel} options={PANEL_ANIMATION} />
           <Stack.Screen name="TimerScreen" component={TimerScreen} options={PANEL_ANIMATION} />
           <Stack.Screen name="EndSession" component={EndSession} />
+          <Stack.Screen name="SessionEndedGuest" component={SessionEndedGuestScreen} />
           <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
           <Stack.Screen name="ReactionsPanel" component={ReactionsPanel} options={PANEL_ANIMATION} />
           <Stack.Screen name="CoHostManager" component={CoHostManager} options={PANEL_ANIMATION} />
