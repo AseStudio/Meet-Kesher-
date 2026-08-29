@@ -36,6 +36,10 @@ export default function VerifyEmailScreen({ navigation, route }) {
 
   const [resent, setResent] = useState(false);
   const [error, setError] = useState('');
+  // Starts counting down immediately since the initial verification email
+  // was already sent as part of sign up — this just stops the Resend
+  // button from being spammable from the moment the screen appears.
+  const [cooldown, setCooldown] = useState(30);
 
   const goToDashboard = (user) => {
     const role = user?.user_metadata?.role || 'attendee';
@@ -88,7 +92,17 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, []);
 
+useEffect(() => {
+  const tick = setInterval(() => {
+    setCooldown((c) => (c > 0 ? c - 1 : 0));
+  }, 1000);
+
+  return () => clearInterval(tick);
+}, []);
+
 const resendEmail = async () => {
+  if (cooldown > 0) return;
+
   if (!email) {
     setError('Email address unavailable.');
     return;
@@ -111,6 +125,8 @@ const resendEmail = async () => {
     }, 5000);
   } catch (err) {
     setError(err.message);
+  } finally {
+    setCooldown(30);
   }
 };
 
@@ -143,6 +159,13 @@ const resendEmail = async () => {
 This screen will automatically continue once your email is verified.
         </Text>
 
+        <View style={styles.spamHint}>
+          <Ionicons name="information-circle-outline" size={14} color={palette.inkMuted} />
+          <Text style={styles.spamHintText}>
+            Don't see it? Check your spam or junk folder — it can land there.
+          </Text>
+        </View>
+
         {error ? (
           <View style={styles.errorCard}>
             <Ionicons name="alert-circle" size={15} color={palette.danger} />
@@ -162,12 +185,13 @@ This screen will automatically continue once your email is verified.
       
 
         <TouchableOpacity
-          style={styles.resendBtn}
+          style={[styles.resendBtn, cooldown > 0 && styles.resendBtnDisabled]}
           onPress={resendEmail}
+          disabled={cooldown > 0}
           activeOpacity={0.7}
         >
-          <Text style={styles.resendBtnText}>
-            Didn't get it? Resend email
+          <Text style={[styles.resendBtnText, cooldown > 0 && styles.resendBtnTextDisabled]}>
+            {cooldown > 0 ? `Still didn't receive it? Resend in ${cooldown}s` : "Didn't get it? Resend email"}
           </Text>
         </TouchableOpacity>
 
@@ -249,6 +273,19 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: '500',
   },
+  spamHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  spamHintText: {
+    fontSize: 12,
+    color: palette.inkMuted,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
   errorCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -284,10 +321,16 @@ const styles = StyleSheet.create({
   resendBtn: {
     paddingVertical: 10,
   },
+  resendBtnDisabled: {
+    opacity: 0.5,
+  },
   resendBtnText: {
     color: palette.primary,
     fontSize: 14,
     fontWeight: '700',
+  },
+  resendBtnTextDisabled: {
+    color: palette.neutralText,
   },
   backBtn: {
     paddingVertical: 10,
