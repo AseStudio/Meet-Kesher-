@@ -88,12 +88,19 @@ export default function LoginScreen({ navigation }) {
     try {
       const { error, cancelled } = await signInWithGoogle();
       if (error) throw error;
-      if (cancelled) setGoogleLoading(false);
-      // No explicit navigate() here on success — same as the previous
-      // web-only version, which relied on whatever handles
-      // supabase.auth.onAuthStateChange elsewhere in the app to route a
-      // newly-signed-in user. That still applies unchanged; only how the
-      // session gets established (this function) changed.
+      if (cancelled) {
+        setGoogleLoading(false);
+        return;
+      }
+      // On web this redirect never actually completes here — the OAuth
+      // flow does a full-page redirect through Supabase, so this promise
+      // never resolves before the page navigates away, and the app
+      // remounts fresh at Splash on return. This replace() is what
+      // makes native behave the same way instead of just sitting on
+      // this screen with nothing happening after a successful sign-in:
+      // native uses an in-app browser sheet, not a page reload, so
+      // LoginScreen stays mounted and needs to navigate itself.
+      navigation.replace('Splash');
     } catch (err) {
       setError(err.message || 'Google sign-in failed.');
       setGoogleLoading(false);

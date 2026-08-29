@@ -144,7 +144,17 @@ const handleGoogleSignUp = async () => {
   try {
     const { error, cancelled } = await signInWithGoogle();
     if (error) throw error;
-    if (cancelled) setGoogleLoading(false);
+    if (cancelled) {
+      setGoogleLoading(false);
+      return;
+    }
+    // Same reasoning as LoginScreen's handleGoogleSignIn — needed so
+    // native (in-app browser sheet, no page reload) actually goes
+    // somewhere after a successful sign-up instead of sitting here.
+    // Splash then sends a first-time Google user on to SelectRole,
+    // since Google sign-up never captures a role the way the
+    // email/password form above does.
+    navigation.replace('Splash');
   } catch (err) {
     setError(err.message || 'Google sign-up failed.');
     setGoogleLoading(false);

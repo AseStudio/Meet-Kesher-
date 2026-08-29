@@ -7,6 +7,7 @@ import { withErrorBoundary } from './src/components/ErrorBoundary'; // adjust pa
 
 import SplashScreen from './src/screens/auth/SplashScreen';
 import SignUpScreen from './src/screens/auth/SignUpScreen';
+import SelectRoleScreen from './src/screens/auth/SelectRoleScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import GuestJoinScreen from './src/screens/auth/GuestJoinScreen';
 import HostDashboard from './src/screens/host/HostDashboard';
@@ -78,6 +79,7 @@ export default function App() {
           <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="SignUp" component={SignUpScreen} />
+          <Stack.Screen name="SelectRole" component={SelectRoleScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="GuestJoin" component={GuestJoinScreen} />
           <Stack.Screen name="HostDashboard" component={HostDashboard} />

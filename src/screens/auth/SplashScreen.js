@@ -101,9 +101,13 @@ const routeBasedOnSession = async () => {
       return;
     }
 
-    // No role yet → Splash (role selection happens there)
+    // No role yet — reached today only via Google sign-in/sign-up, which
+    // (unlike email/password sign-up) never captures a role up front.
+    // This used to `navigation.replace('Splash')`, which just replayed
+    // this exact same check forever since nothing about the condition
+    // ever changed — the infinite splash loop this fixes.
     if (!profile?.role) {
-      navigation.replace('Splash');
+      navigation.replace('SelectRole');
       return;
     }
 
@@ -118,7 +122,9 @@ const routeBasedOnSession = async () => {
         break;
 
       default:
-        navigation.replace('Splash');
+        // Unexpected role value — same fallback as no role at all,
+        // rather than looping back into this exact same switch again.
+        navigation.replace('SelectRole');
         break;
     }
 
