@@ -70,7 +70,7 @@ export default function CommunityScreen({ navigation, route }) {
     <View style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.title}>Community</Text>
-        {isHost && verified && (
+        {tab === 'channels' && isHost && verified && (
           <TouchableOpacity
             style={styles.newChannelBtn}
             onPress={() => navigation.navigate('CreateChannel')}
@@ -78,6 +78,16 @@ export default function CommunityScreen({ navigation, route }) {
           >
             <Ionicons name="add" size={18} color={palette.surface} />
             <Text style={styles.newChannelBtnText}>New channel</Text>
+          </TouchableOpacity>
+        )}
+        {tab === 'feed' && (
+          <TouchableOpacity
+            style={styles.newChannelBtn}
+            onPress={() => navigation.navigate('ComposePost')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={18} color={palette.surface} />
+            <Text style={styles.newChannelBtnText}>Add a post</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -103,7 +113,7 @@ export default function CommunityScreen({ navigation, route }) {
         {tab === 'channels' ? (
           <ChannelsTab navigation={navigation} isHost={isHost} isVerified={verified} />
         ) : (
-          <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} />
+          <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} isPremium={!!profile?.is_premium} />
         )}
       </View>
 

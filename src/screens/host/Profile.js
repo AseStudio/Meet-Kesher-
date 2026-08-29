@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens
@@ -26,6 +27,8 @@ const palette = {
   dangerSoft: '#FFE9E9',
   amber: colors.yellow,
   amberSoft: '#FFF3DE',
+  premium: '#7C3AED',
+  premiumSoft: '#F1E8FE',
   neutralSoft: colors.greyLight,
   neutralText: colors.grey,
 };
@@ -144,18 +147,30 @@ export default function Profile({ navigation }) {
         {/* Subscription */}
         <View style={styles.subscriptionCard}>
           <View style={styles.subLeft}>
-            <View style={styles.subIconWrap}>
-              <Ionicons name="pricetag-outline" size={19} color={palette.primary} />
+            <View style={[styles.subIconWrap, profile?.is_premium && styles.subIconWrapPremium]}>
+              <Ionicons
+                name={profile?.is_premium ? 'sparkles' : 'pricetag-outline'}
+                size={19}
+                color={profile?.is_premium ? palette.premium : palette.primary}
+              />
             </View>
             <View style={styles.subTextWrap}>
-              <Text style={styles.subPlan}>Free Plan</Text>
-              <Text style={styles.subDesc}>Limited sessions · Ads in lobby</Text>
+              <Text style={styles.subPlan}>{profile?.is_premium ? 'Premium Plan' : 'Free Plan'}</Text>
+              <Text style={styles.subDesc}>
+                {profile?.is_premium ? 'No ads in your feed — thanks for supporting Kesher' : 'Ads in your feed'}
+              </Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.85}>
-            <Text style={styles.upgradeBtnText}>Upgrade</Text>
-            <Ionicons name="sparkles" size={13} color={palette.surface} />
-          </TouchableOpacity>
+          {!profile?.is_premium && (
+            <TouchableOpacity
+              style={styles.upgradeBtn}
+              activeOpacity={0.85}
+              onPress={() => showAlert('Kesher Premium', 'Premium subscriptions are coming soon.')}
+            >
+              <Text style={styles.upgradeBtnText}>Upgrade</Text>
+              <Ionicons name="sparkles" size={13} color={palette.surface} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Settings */}
@@ -281,6 +296,7 @@ const styles = StyleSheet.create({
   },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  subIconWrapPremium: { backgroundColor: palette.premiumSoft },
   subTextWrap: { flex: 1 },
   subPlan: { fontSize: 14.5, fontWeight: '700', color: palette.ink },
   subDesc: { fontSize: 11.5, color: palette.inkMuted, marginTop: 2, fontWeight: '500' },
