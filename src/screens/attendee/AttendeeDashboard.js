@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { useJoinSessionByCode } from '../../lib/useJoinSessionByCode';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — layered on top of theme/colors.js rather than editing it
@@ -68,10 +69,7 @@ const SUB_STATUS_META = {
 
 export default function AttendeeDashboard({ navigation }) {
   const [profile, setProfile] = useState(null);
-  const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [joinError, setJoinError] = useState('');
-  const [joinLoading, setJoinLoading] = useState(false);
+  const { code, setCode, password, setPassword, joinError, joinLoading, handleJoin } = useJoinSessionByCode(navigation);
   const [attendedSessions, setAttendedSessions] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -108,88 +106,6 @@ export default function AttendeeDashboard({ navigation }) {
 
     } catch (e) { console.log('loadData error:', e.message); }
     finally { setLoading(false); }
-  };
-
-  const handleJoin = async () => {
-    setJoinError('');
-    if (!code.trim() || code.length < 6) return setJoinError('Enter a valid 6-character code.');
-    if (!password.trim()) return setJoinError('Enter the session password.');
-
-    setJoinLoading(true);
-    try {
-      const { data: session, error } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('code', code.trim().toUpperCase())
-        .single();
-
-      if (error || !session) {
-        setJoinError('Session not found. Check your code.');
-        setJoinLoading(false);
-        return;
-      }
-
-      if (session.password !== password.trim()) {
-        setJoinError('Incorrect password.');
-        setJoinLoading(false);
-        return;
-      }
-
-      if (session.status === 'ended') {
-        setJoinError('This session has already ended.');
-        setJoinLoading(false);
-        return;
-      }
-
-      if (session.status === 'cancelled') {
-        setJoinError('This session was cancelled by the host.');
-        setJoinLoading(false);
-        return;
-      }
-
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // Check ban BEFORE adding them as an attendee
-      if (user) {
-        const { data: ban } = await supabase
-          .from('bans')
-          .select('id')
-          .eq('host_id', session.host_id)
-          .eq('banned_user_id', user.id)
-          .maybeSingle();
-
-        if (ban) {
-          setJoinError('You have been banned from this host\'s sessions.');
-          setJoinLoading(false);
-          return;
-        }
-
-        const { data: existing } = await supabase
-          .from('session_attendees')
-          .select('id')
-          .eq('session_id', session.id)
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (!existing) {
-          await supabase.from('session_attendees').insert({
-            session_id: session.id,
-            user_id: user.id,
-          });
-        }
-      }
-
-      if (session.status === 'live') {
-        navigation.navigate('AttendeeSession', { session });
-      } else {
-        navigation.navigate('Lobby', { session, attendee: true });
-      }
-
-    } catch (err) {
-      setJoinError(err.message || 'Failed to join session.');
-    } finally {
-      setJoinLoading(false);
-    }
   };
 
   const getGreeting = () => {
@@ -231,6 +147,28 @@ export default function AttendeeDashboard({ navigation }) {
             </View>
           </TouchableOpacity>
         </View>
+
+        {/* Host a Session — cross-entry point so an attendee account can
+            also start their own sessions, same flow a Host account uses. */}
+        <TouchableOpacity activeOpacity={0.88} onPress={() => navigation.navigate('CreateSession')}>
+          <LinearGradient
+            colors={[palette.primaryBright, palette.primary, palette.primaryDeep]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.newSessionBanner}
+          >
+            <View style={styles.newSessionIcon}>
+              <Ionicons name="add" size={26} color={palette.primary} />
+            </View>
+            <View style={styles.newSessionText}>
+              <Text style={styles.newSessionTitle}>Host a Session</Text>
+              <Text style={styles.newSessionSubtitle}>Create and run your own session</Text>
+            </View>
+            <View style={styles.newSessionArrow}>
+              <Ionicons name="chevron-forward" size={18} color={palette.surface} />
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
 
         {/* Join Card */}
         <LinearGradient
@@ -385,6 +323,12 @@ const cardShadow = Platform.select({
   default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
 });
 
+const newSessionShadow = Platform.select({
+  ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.28, shadowRadius: 20 },
+  android: { elevation: 10 },
+  default: { boxShadow: `0 10px 26px rgba(62,31,184,0.28)` },
+});
+
 const joinShadow = Platform.select({
   ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.28, shadowRadius: 20 },
   android: { elevation: 10 },
@@ -407,6 +351,14 @@ const styles = StyleSheet.create({
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: palette.primary, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 16, fontWeight: '700', color: palette.surface },
   onlineDot: { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: palette.success, borderWidth: 2, borderColor: palette.canvas },
+
+  // ── Host a Session banner ──
+  newSessionBanner: { borderRadius: 22, padding: 20, flexDirection: 'row', alignItems: 'center', marginBottom: 16, ...newSessionShadow },
+  newSessionIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  newSessionText: { flex: 1 },
+  newSessionTitle: { fontSize: 19, fontWeight: '800', color: palette.surface, letterSpacing: -0.3 },
+  newSessionSubtitle: { fontSize: 12.5, color: 'rgba(255,255,255,0.82)', marginTop: 3, fontWeight: '500' },
+  newSessionArrow: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
 
   // ── Join card ──
   joinCard: { borderRadius: 22, padding: 20, marginBottom: 22, gap: 12, ...joinShadow },

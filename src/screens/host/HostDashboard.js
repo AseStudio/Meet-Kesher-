@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Platform, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import SessionExpiredModal from '../../components/SessionExpiredModal';
 import { useExpiredLobbyWatcher } from '../../lib/useExpiredLobbyWatcher';
 import { usePushSubscription } from '../../lib/usePushSubscription';
+import { useJoinSessionByCode } from '../../lib/useJoinSessionByCode';
 import { getSessionJoinLink } from '../../lib/links';
 import { showAlert } from '../../lib/alert';
 
@@ -68,6 +69,7 @@ export default function HostDashboard({ navigation }) {
   const [recent, setRecent] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const { code, setCode, password, setPassword, joinError, joinLoading, handleJoin } = useJoinSessionByCode(navigation);
 
   // Session-expiry watch (lobby timer ran out, host hasn't started or
   // cancelled yet) now lives in one shared hook instead of being
@@ -207,6 +209,70 @@ export default function HostDashboard({ navigation }) {
             </View>
           </LinearGradient>
         </TouchableOpacity>
+
+        {/* Join a Session — cross-entry point so a Host account can also
+            attend someone else's session, same flow an Attendee account
+            uses. */}
+        <LinearGradient
+          colors={[palette.primaryBright, palette.primary, palette.primaryDeep]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.joinCard}
+        >
+          <View style={styles.joinHeaderRow}>
+            <View style={styles.joinIconBadge}>
+              <Ionicons name="log-in-outline" size={18} color={palette.surface} />
+            </View>
+            <Text style={styles.joinTitle}>Join a Session</Text>
+          </View>
+
+          <View style={styles.joinInputWrap}>
+            <Ionicons name="keypad-outline" size={17} color="rgba(255,255,255,0.75)" style={styles.joinInputIcon} />
+            <TextInput
+              style={styles.joinInput}
+              placeholder="6-character code"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={code}
+              onChangeText={t => setCode(t.toUpperCase())}
+              maxLength={6}
+              autoCapitalize="characters"
+            />
+          </View>
+          <View style={styles.joinInputWrap}>
+            <Ionicons name="lock-closed-outline" size={17} color="rgba(255,255,255,0.75)" style={styles.joinInputIcon} />
+            <TextInput
+              style={styles.joinInput}
+              placeholder="Session password"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+          </View>
+
+          {joinError ? (
+            <View style={styles.joinErrorRow}>
+              <Ionicons name="alert-circle" size={15} color="#FFD7DE" />
+              <Text style={styles.joinError}>{joinError}</Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity
+            style={[styles.joinButton, joinLoading && styles.joinButtonDisabled]}
+            onPress={handleJoin}
+            disabled={joinLoading}
+            activeOpacity={0.85}
+          >
+            {joinLoading ? (
+              <ActivityIndicator color={palette.primary} />
+            ) : (
+              <>
+                <Text style={styles.joinButtonText}>Join Now</Text>
+                <Ionicons name="arrow-forward" size={17} color={palette.primary} />
+              </>
+            )}
+          </TouchableOpacity>
+        </LinearGradient>
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -397,6 +463,20 @@ const styles = StyleSheet.create({
   newSessionTitle: { fontSize: 19, fontWeight: '800', color: palette.surface, letterSpacing: -0.3 },
   newSessionSubtitle: { fontSize: 12.5, color: 'rgba(255,255,255,0.82)', marginTop: 3, fontWeight: '500' },
   newSessionArrow: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+
+  // ── Join card ──
+  joinCard: { borderRadius: 22, padding: 20, marginBottom: 22, gap: 12, ...bannerShadow },
+  joinHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 },
+  joinIconBadge: { width: 30, height: 30, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  joinTitle: { fontSize: 18, fontWeight: '800', color: palette.surface, letterSpacing: -0.2 },
+  joinInputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)', paddingHorizontal: 14 },
+  joinInputIcon: { marginRight: 8 },
+  joinInput: { flex: 1, paddingVertical: 13, fontSize: 15, color: palette.surface, fontWeight: '600', outlineStyle: 'none' },
+  joinErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  joinError: { color: '#FFE4E9', fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  joinButton: { flexDirection: 'row', gap: 8, backgroundColor: palette.surface, borderRadius: 13, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  joinButtonDisabled: { opacity: 0.7 },
+  joinButtonText: { color: palette.primary, fontSize: 15.5, fontWeight: '800' },
 
   // ── Sections ──
   section: { backgroundColor: palette.surface, borderRadius: 20, padding: 18, marginBottom: 16, ...cardShadow },
