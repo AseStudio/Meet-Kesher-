@@ -40,6 +40,7 @@ import WelcomeScreen from './src/screens/WelcomeScreen';
 
 import CommunityScreen from './src/screens/community/CommunityScreen';
 import ComposePostScreen from './src/screens/community/ComposePostScreen';
+import PostCommentsScreen from './src/screens/community/PostCommentsScreen';
 import CreateChannelScreen from './src/screens/community/CreateChannelScreen';
 import ChannelChatScreen from './src/screens/community/ChannelChatScreen';
 import ChannelRolesScreen from './src/screens/community/ChannelRolesScreen';
@@ -128,6 +129,7 @@ export default function App() {
           {/* Community feature */}
           <Stack.Screen name="Community" component={CommunityScreen} />
           <Stack.Screen name="ComposePost" component={ComposePostScreen} options={PANEL_ANIMATION} />
+          <Stack.Screen name="PostComments" component={PostCommentsScreen} options={PANEL_ANIMATION} />
           <Stack.Screen name="CreateChannel" component={CreateChannelScreen} options={PANEL_ANIMATION} />
           <Stack.Screen name="ChannelChat" component={ChannelChatScreen} />
           <Stack.Screen name="ChannelRoles" component={ChannelRolesScreen} options={PANEL_ANIMATION} />

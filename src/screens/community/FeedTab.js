@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  FlatList, ActivityIndicator, RefreshControl,
+  FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const palette = {
   primary: colors.primary,
@@ -112,6 +115,49 @@ function buildDisplayFeed(posts, isPremium) {
   return result;
 }
 
+// ~15% of the feed is reserved for lower-interaction posts getting a
+// boost — otherwise the same handful of top posts would dominate every
+// refresh forever and nothing new ever gets seen, the classic
+// rich-get-richer feed problem. Ranking only ever runs once per load()
+// (baked into `posts`' order, not recomputed from live like/comment
+// counts) — see the comment on the load() call below for why: without
+// that, liking a post mid-scroll would reshuffle the whole feed under
+// someone's thumb.
+const DISCOVERY_RATIO = 0.15;
+
+function rankPosts(posts, reactionCounts, commentCounts) {
+  if (posts.length < 4) return posts; // too few to meaningfully rank/mix
+
+  const scored = posts.map((p) => ({
+    post: p,
+    score: (reactionCounts[p.id] || 0) + (commentCounts[p.id] || 0),
+  }));
+  const byScore = [...scored].sort((a, b) => b.score - a.score);
+
+  const discoveryCount = Math.max(1, Math.round(posts.length * DISCOVERY_RATIO));
+  // Pull discovery picks from the bottom half specifically — genuinely
+  // quieter posts, not near-top ones — so this is actually giving
+  // low-interaction posts a shot, not just reshuffling the leaders.
+  const bottomHalf = byScore.slice(Math.floor(byScore.length / 2));
+  const shuffledBottom = [...bottomHalf].sort(() => Math.random() - 0.5);
+  const discoveryPicks = shuffledBottom.slice(0, discoveryCount);
+  const discoveryIds = new Set(discoveryPicks.map((d) => d.post.id));
+
+  const rest = byScore.filter((s) => !discoveryIds.has(s.post.id)).map((s) => s.post);
+
+  // Weave discovery picks into random spots among the ranked list
+  // instead of tacking them onto the end — that's what keeps a refresh
+  // from feeling like "the same top posts, plus some randoms at the
+  // bottom every time."
+  const result = [...rest];
+  discoveryPicks.forEach(({ post }) => {
+    const insertAt = Math.floor(Math.random() * (result.length + 1));
+    result.splice(insertAt, 0, post);
+  });
+
+  return result;
+}
+
 function getInitials(name) {
   return (name || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -140,6 +186,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   const [userId, setUserId] = useState(null);
   const [myReactions, setMyReactions] = useState(new Set());
   const [reactionCounts, setReactionCounts] = useState({});
+  const [commentCounts, setCommentCounts] = useState({});
 
   const load = useCallback(async (isRefresh) => {
     isRefresh ? setRefreshing(true) : setLoading(true);
@@ -158,14 +205,24 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
 
       const { data: publishedRows, error } = await supabase
         .from('feed_posts')
-        .select('*, channels(name), profiles(full_name)')
+        .select('*, channels(name), profiles(full_name), feed_post_media(url, position)')
         .eq('status', 'published')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
-      setPosts(publishedRows || []);
+      // feed_post_media comes back unordered from the embed — sort by
+      // position client-side rather than fighting PostgREST's embedded-
+      // resource ordering syntax for something this small.
+      const sorted = (publishedRows || []).map((p) => ({
+        ...p,
+        feed_post_media: (p.feed_post_media || []).slice().sort((a, b) => a.position - b.position),
+      }));
 
-      const postIds = (publishedRows || []).map((p) => p.id);
+      const postIds = sorted.map((p) => p.id);
+      let counts = {};
+      let mine = new Set();
+      let cCounts = {};
+
       if (postIds.length > 0) {
         // One query covers both "did I like this" and "how many likes
         // total" — no per-post follow-up queries, no DB view/RPC needed.
@@ -173,19 +230,30 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           .from('feed_post_reactions')
           .select('post_id, user_id')
           .in('post_id', postIds);
-
-        const counts = {};
-        const mine = new Set();
         (reactionRows || []).forEach((r) => {
           counts[r.post_id] = (counts[r.post_id] || 0) + 1;
           if (r.user_id === user.id) mine.add(r.post_id);
         });
-        setReactionCounts(counts);
-        setMyReactions(mine);
-      } else {
-        setReactionCounts({});
-        setMyReactions(new Set());
+
+        const { data: commentRows } = await supabase
+          .from('feed_post_comments')
+          .select('post_id')
+          .in('post_id', postIds);
+        (commentRows || []).forEach((c) => {
+          cCounts[c.post_id] = (cCounts[c.post_id] || 0) + 1;
+        });
       }
+
+      // Ranking happens exactly once here, baked into the order `posts`
+      // is set in — deliberately NOT recomputed reactively off the live
+      // reactionCounts/commentCounts state below. If it were, liking or
+      // commenting on a post mid-scroll would reshuffle the whole feed
+      // under someone's thumb. This only reshuffles on an actual
+      // load/refresh, matching "ranked, but only when refreshed."
+      setPosts(rankPosts(sorted, counts, cCounts));
+      setReactionCounts(counts);
+      setMyReactions(mine);
+      setCommentCounts(cCounts);
     } catch (e) {
       showAlert('Could not load feed', e.message);
     } finally {
@@ -194,9 +262,16 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
     }
   }, []);
 
-  useEffect(() => { load(false); }, [load]);
+  // Covers both the initial mount AND every time this tab regains focus
+  // (e.g. returning from PostCommentsScreen after adding a comment) —
+  // React Navigation's 'focus' event fires on first mount too, so a
+  // separate mount-only effect calling load() would just double-fetch.
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => load(false));
+    return unsub;
+  }, [navigation, load]);
 
-  // Re-shuffled only when the underlying posts actually change (a fresh
+  // Re-mixed only when the underlying posts actually change (a fresh
   // load or pull-to-refresh) — not on every render, so toggling a like
   // doesn't reshuffle ad positions under someone's thumb.
   const displayFeed = useMemo(() => buildDisplayFeed(posts, isPremium), [posts, isPremium]);
@@ -401,14 +476,48 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
                   </View>
                 )}
 
-                <Text style={styles.postBody}>{item.body}</Text>
+                {item.body ? <Text style={styles.postBody}>{item.body}</Text> : null}
+
+                {item.media_type === 'image' && item.feed_post_media?.length > 0 && (
+                  item.feed_post_media.length === 1 ? (
+                    <Image source={{ uri: item.feed_post_media[0].url }} style={styles.singleImage} resizeMode="cover" />
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaScrollRow}>
+                      {item.feed_post_media.map((m) => (
+                        <Image key={m.id} source={{ uri: m.url }} style={styles.multiImage} resizeMode="cover" />
+                      ))}
+                    </ScrollView>
+                  )
+                )}
+
+                {item.media_type === 'video' && item.feed_post_media?.[0]?.url && (
+                  <Video
+                    source={{ uri: item.feed_post_media[0].url }}
+                    style={styles.postVideo}
+                    useNativeControls
+                    resizeMode={ResizeMode.CONTAIN}
+                  />
+                )}
+
                 {!isPromo && (
-                  <TouchableOpacity style={styles.reactionRow} onPress={() => toggleReaction(item.id)} activeOpacity={0.7}>
-                    <Ionicons name={reacted ? 'heart' : 'heart-outline'} size={18} color={reacted ? palette.primary : palette.neutralText} />
-                    <Text style={[styles.reactionText, reacted && { color: palette.primary }]}>
-                      {count > 0 ? `${count} ${count === 1 ? 'like' : 'likes'}` : 'Like'}
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.actionsRow}>
+                    <TouchableOpacity style={styles.reactionRow} onPress={() => toggleReaction(item.id)} activeOpacity={0.7}>
+                      <Ionicons name={reacted ? 'heart' : 'heart-outline'} size={18} color={reacted ? palette.primary : palette.neutralText} />
+                      <Text style={[styles.reactionText, reacted && { color: palette.primary }]}>
+                        {count > 0 ? `${count} ${count === 1 ? 'like' : 'likes'}` : 'Like'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.reactionRow}
+                      onPress={() => navigation.navigate('PostComments', { post: item })}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="chatbubble-outline" size={16} color={palette.neutralText} />
+                      <Text style={styles.reactionText}>
+                        {(commentCounts[item.id] || 0) > 0 ? `${commentCounts[item.id]} comment${commentCounts[item.id] === 1 ? '' : 's'}` : 'Comment'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             );
@@ -457,7 +566,12 @@ const styles = StyleSheet.create({
   authorTime: { fontSize: 12, color: palette.neutralText, fontWeight: '500' },
 
   postBody: { fontSize: 14, color: palette.ink, lineHeight: 20 },
-  reactionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  singleImage: { width: '100%', aspectRatio: 1.3, borderRadius: 12, marginTop: 10, backgroundColor: palette.line },
+  mediaScrollRow: { marginTop: 10 },
+  multiImage: { width: SCREEN_WIDTH * 0.55, aspectRatio: 1, borderRadius: 12, marginRight: 8, backgroundColor: palette.line },
+  postVideo: { width: '100%', aspectRatio: 16 / 9, borderRadius: 12, marginTop: 10, backgroundColor: '#000' },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 10 },
+  reactionRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reactionText: { fontSize: 12.5, color: palette.neutralText, fontWeight: '600' },
 
   upsellCard: { borderWidth: 1.5, borderColor: palette.premiumSoft, backgroundColor: palette.premiumSoft },
