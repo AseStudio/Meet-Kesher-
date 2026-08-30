@@ -56,18 +56,31 @@ const Stack = createNativeStackNavigator();
 const PANEL_ANIMATION = { animation: 'slide_from_bottom' };
 
 export default function App() {
-  // Background cleanup only — never blocks rendering. Splash always mounts
-  // first and does its own fresh session check after the animation plays.
+  // Runs the stale-session check only once Supabase has actually
+  // finished resolving the *real* initial session — not immediately on
+  // mount. On web that resolution includes detectSessionInUrl
+  // exchanging a Google OAuth redirect's ?code= for a session, which is
+  // asynchronous. The old version called getUser() immediately on
+  // mount, racing that exchange: if getUser() ran first, it found no
+  // session yet and called signOut() — which wipes the PKCE code
+  // verifier the exchange still needed, silently breaking every Google
+  // sign-in/sign-up on web. 'INITIAL_SESSION' is the event Supabase
+  // fires once that resolution (URL-detection included) is actually
+  // done, so checking there instead removes the race entirely.
   useEffect(() => {
-    const cleanupStaleSession = async () => {
+    let subscription;
+    const { data } = supabase.auth.onAuthStateChange(async (event) => {
+      if (event !== 'INITIAL_SESSION') return;
+      subscription?.unsubscribe();
       try {
         const { data: { user }, error } = await supabase.auth.getUser();
         if (error || !user) {
           await supabase.auth.signOut();
         }
       } catch (e) {}
-    };
-    cleanupStaleSession();
+    });
+    subscription = data.subscription;
+    return () => subscription?.unsubscribe();
   }, []);
 
   return (
