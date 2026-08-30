@@ -92,15 +92,20 @@ export default function LoginScreen({ navigation }) {
         setGoogleLoading(false);
         return;
       }
-      // On web this redirect never actually completes here — the OAuth
-      // flow does a full-page redirect through Supabase, so this promise
-      // never resolves before the page navigates away, and the app
-      // remounts fresh at Splash on return. This replace() is what
-      // makes native behave the same way instead of just sitting on
-      // this screen with nothing happening after a successful sign-in:
-      // native uses an in-app browser sheet, not a page reload, so
-      // LoginScreen stays mounted and needs to navigate itself.
-      navigation.replace('Splash');
+      // Only needed on native — there, signInWithGoogle() opens an
+      // in-app browser sheet rather than navigating the page, so this
+      // app is still mounted afterward and has to navigate itself. On
+      // web, signInWithOAuth() already triggers a real window.location
+      // redirect to Google as a side effect of the call above; JS
+      // doesn't halt the instant that's kicked off, so calling
+      // navigate() here raced that redirect — Splash would flash and
+      // start its animation for a moment before the real navigation to
+      // Google's account picker cut it off. The web case doesn't need
+      // this at all: the page is already on its way to reloading fresh
+      // once Google redirects back to /app.
+      if (Platform.OS !== 'web') {
+        navigation.replace('Splash');
+      }
     } catch (err) {
       setError(err.message || 'Google sign-in failed.');
       setGoogleLoading(false);
