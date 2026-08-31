@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
+import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens
@@ -47,6 +48,10 @@ export default function Profile({ navigation }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sessionCount, setSessionCount] = useState(0);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [usernameError, setUsernameError] = useState('');
 
   useEffect(() => {
     loadProfile();
@@ -80,6 +85,53 @@ export default function Profile({ navigation }) {
 
   const getInitials = (name) =>
     (name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+
+  const startEditingUsername = () => {
+    setUsernameInput(profile?.username || '');
+    setUsernameError('');
+    setEditingUsername(true);
+  };
+
+  // Anyone whose account predates the username feature has none yet —
+  // this is that backfill path. Deliberately not a blocking gate like
+  // SelectRoleScreen: mentions/notifications degrade gracefully without
+  // one (falls back to full name), so there's no reason to interrupt
+  // someone's session just to force this right now.
+  const saveUsername = async () => {
+    const clean = sanitizeUsernameInput(usernameInput);
+    if (!isValidUsername(clean)) {
+      setUsernameError('3-20 characters: lowercase letters, numbers, underscores.');
+      return;
+    }
+    setSavingUsername(true);
+    setUsernameError('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Session expired.');
+
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', clean)
+        .neq('id', user.id)
+        .maybeSingle();
+      if (existing) {
+        setUsernameError('That username is taken.');
+        setSavingUsername(false);
+        return;
+      }
+
+      const { error } = await supabase.from('profiles').update({ username: clean }).eq('id', user.id);
+      if (error) throw error;
+
+      setProfile((prev) => ({ ...prev, username: clean }));
+      setEditingUsername(false);
+    } catch (e) {
+      setUsernameError(e.message || 'Could not save username.');
+    } finally {
+      setSavingUsername(false);
+    }
+  };
 
   // Existing "Sessions Joined" count, plus a "Member Since" stat computed
   // from profile.created_at if that column exists on your profiles table
@@ -120,6 +172,36 @@ export default function Profile({ navigation }) {
 
           <Text style={styles.name}>{profile?.full_name || 'User'}</Text>
           <Text style={styles.email}>{profile?.email || ''}</Text>
+
+          {editingUsername ? (
+            <View style={styles.usernameEditRow}>
+              <Text style={styles.usernameAt}>@</Text>
+              <TextInput
+                style={styles.usernameEditInput}
+                value={usernameInput}
+                onChangeText={(t) => setUsernameInput(sanitizeUsernameInput(t))}
+                placeholder="username"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+              <TouchableOpacity onPress={saveUsername} disabled={savingUsername} activeOpacity={0.8} style={styles.usernameSaveBtn}>
+                <Ionicons name="checkmark" size={16} color={palette.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditingUsername(false)} activeOpacity={0.8} style={styles.usernameCancelBtn}>
+                <Ionicons name="close" size={16} color={palette.surface} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={startEditingUsername} activeOpacity={0.75} style={styles.usernameDisplayRow}>
+              <Text style={styles.usernameDisplayText}>
+                {profile?.username ? `@${profile.username}` : 'Set a username'}
+              </Text>
+              <Ionicons name="pencil" size={11} color="rgba(255,255,255,0.75)" />
+            </TouchableOpacity>
+          )}
+          {usernameError ? <Text style={styles.usernameErrorText}>{usernameError}</Text> : null}
 
           <View style={styles.roleBadge}>
             <Ionicons name="star" size={12} color="#FFD873" />
@@ -265,6 +347,14 @@ const styles = StyleSheet.create({
   avatarText: { color: palette.surface, fontSize: 28, fontWeight: '800' },
   name: { fontSize: 21, fontWeight: '800', color: palette.surface, letterSpacing: -0.3, marginTop: 2 },
   email: { fontSize: 12.5, color: 'rgba(255,255,255,0.78)', fontWeight: '500' },
+  usernameDisplayRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  usernameDisplayText: { fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
+  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  usernameAt: { fontSize: 12.5, color: 'rgba(255,255,255,0.7)', fontWeight: '700' },
+  usernameEditInput: { fontSize: 12.5, color: colors.white, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
+  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
+  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  usernameErrorText: { fontSize: 10.5, color: '#FFD7DE', fontWeight: '600', marginTop: 4 },
   roleBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: 'rgba(255,255,255,0.18)',

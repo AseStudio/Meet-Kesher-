@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { signInWithGoogle } from '../../lib/oauth';
+import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
 import LogoMark from '../../components/LogoMark';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ const palette = {
 
 export default function SignUpScreen({ navigation }) {
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [usernameTaken, setUsernameTaken] = useState(false);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -56,11 +59,35 @@ export default function SignUpScreen({ navigation }) {
     }
   };
 
+  // Same live-check pattern as the email field above — usernames are
+  // sanitized (lowercase, a-z0-9_ only) as the person types, then
+  // checked for uniqueness once there's enough of one to be worth
+  // checking.
+  const handleUsernameChange = async (text) => {
+    const clean = sanitizeUsernameInput(text);
+    setUsername(clean);
+    setUsernameTaken(false);
+    if (clean.length >= 3) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', clean)
+        .maybeSingle();
+      if (data) setUsernameTaken(true);
+    }
+  };
+
  const handleSignUp = async () => {
   setError('');
 
   if (!name.trim())
     return setError('Please enter your full name.');
+
+  if (!isValidUsername(username))
+    return setError('Choose a username: 3-20 characters, lowercase letters, numbers, and underscores only.');
+
+  if (usernameTaken)
+    return setError('That username is already taken.');
 
   if (!email.trim())
     return setError('Please enter your email address.');
@@ -98,6 +125,22 @@ export default function SignUpScreen({ navigation }) {
       return;
     }
 
+    // Re-check right before creating the account too — someone else
+    // could have claimed this exact username in the gap between the
+    // last keystroke and hitting submit. The DB's unique constraint is
+    // the real backstop either way; this is just for a friendlier error
+    // message than a raw constraint-violation would give.
+    const { data: existingUsername } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('username', username)
+      .maybeSingle();
+
+    if (existingUsername) {
+      setError('That username was just taken — try another.');
+      return;
+    }
+
     console.log('CREATING ACCOUNT...');
 
     const { data, error: signUpError } =
@@ -107,6 +150,7 @@ export default function SignUpScreen({ navigation }) {
         options: {
           data: {
             full_name: name.trim(),
+            username,
             role,
             phone: phone.trim(),
           },
@@ -207,6 +251,22 @@ const handleGoogleSignUp = async () => {
               onChangeText={setName}
             />
           </View>
+
+          {/* Username */}
+          <Text style={styles.label}>Username <Text style={styles.required}>*</Text></Text>
+          <View style={[styles.inputRow, usernameTaken && styles.inputRowError]}>
+            <Ionicons name="at-outline" size={17} color={usernameTaken ? palette.danger : palette.neutralText} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="lowercase, numbers, underscores"
+              placeholderTextColor={palette.neutralText}
+              value={username}
+              onChangeText={handleUsernameChange}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          {usernameTaken && <Text style={styles.emailExistsText}>That username is taken.</Text>}
 
           {/* Email */}
           <Text style={styles.label}>Email <Text style={styles.required}>*</Text></Text>

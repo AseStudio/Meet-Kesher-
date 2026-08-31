@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Platform,
+  ActivityIndicator, Platform, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
 import LogoMark from '../../components/LogoMark';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -37,6 +38,8 @@ const palette = {
 // ─────────────────────────────────────────────────────────────────────
 export default function SelectRoleScreen({ navigation }) {
   const [role, setRole] = useState('host');
+  const [username, setUsername] = useState('');
+  const [usernameTaken, setUsernameTaken] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingSession, setCheckingSession] = useState(true);
@@ -55,12 +58,46 @@ export default function SelectRoleScreen({ navigation }) {
     return () => { mounted = false; };
   }, []);
 
+  const handleUsernameChange = async (text) => {
+    const clean = sanitizeUsernameInput(text);
+    setUsername(clean);
+    setUsernameTaken(false);
+    if (clean.length >= 3) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', clean)
+        .maybeSingle();
+      if (data) setUsernameTaken(true);
+    }
+  };
+
   const handleContinue = async () => {
     setError('');
+
+    if (!isValidUsername(username)) {
+      setError('Choose a username: 3-20 characters, lowercase letters, numbers, and underscores only.');
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) throw userError || new Error('Session expired. Please sign in again.');
+
+      // Re-check right before saving — the last keystroke's check could
+      // be stale by the time someone actually hits Continue.
+      const { data: existingUsername } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', username)
+        .neq('id', user.id)
+        .maybeSingle();
+      if (existingUsername) {
+        setError('That username was just taken — try another.');
+        setLoading(false);
+        return;
+      }
 
       // upsert, not insert — a profiles row may already exist for this
       // user (created with role left null) or may not exist at all,
@@ -72,6 +109,7 @@ export default function SelectRoleScreen({ navigation }) {
           id: user.id,
           email: user.email,
           full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+          username,
           role,
         });
 
@@ -101,7 +139,7 @@ export default function SelectRoleScreen({ navigation }) {
         </View>
 
         <Text style={styles.title}>One quick thing</Text>
-        <Text style={styles.subtitle}>How do you want to use Kesher? You can still do the other any time from your dashboard.</Text>
+        <Text style={styles.subtitle}>Pick a username, and how you want to use Kesher. You can still do the other any time from your dashboard.</Text>
 
         {error ? (
           <View style={styles.errorCard}>
@@ -109,6 +147,20 @@ export default function SelectRoleScreen({ navigation }) {
             <Text style={styles.errorText}>{error}</Text>
           </View>
         ) : null}
+
+        <View style={[styles.usernameRow, usernameTaken && styles.usernameRowError]}>
+          <Text style={styles.usernameAt}>@</Text>
+          <TextInput
+            style={styles.usernameInput}
+            placeholder="choose a username"
+            placeholderTextColor={palette.neutralText}
+            value={username}
+            onChangeText={handleUsernameChange}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+        {usernameTaken && <Text style={styles.usernameTakenText}>That username is taken.</Text>}
 
         <View style={styles.roleRow}>
           <TouchableOpacity
@@ -183,6 +235,11 @@ const styles = StyleSheet.create({
   errorCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: palette.dangerSoft, borderRadius: 12, padding: 12, marginBottom: 14, width: '100%' },
   errorText: { color: palette.danger, fontSize: 13, fontWeight: '600', flexShrink: 1 },
   roleRow: { flexDirection: 'row', gap: 12, width: '100%', marginBottom: 20 },
+  usernameRow: { flexDirection: 'row', alignItems: 'center', width: '100%', borderRadius: 13, borderWidth: 1.5, borderColor: palette.line, backgroundColor: palette.surface, paddingHorizontal: 14, marginBottom: 6, ...inputShadow },
+  usernameRowError: { borderColor: palette.danger },
+  usernameAt: { fontSize: 15, fontWeight: '700', color: palette.neutralText, marginRight: 2 },
+  usernameInput: { flex: 1, paddingVertical: 13, fontSize: 15, color: palette.ink, fontWeight: '600', outlineStyle: 'none' },
+  usernameTakenText: { color: palette.danger, fontSize: 12, fontWeight: '600', marginBottom: 14, alignSelf: 'flex-start' },
   roleCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 13, borderWidth: 1.5, borderColor: palette.line, backgroundColor: palette.surface, ...inputShadow },
   roleCardActive: { borderColor: palette.primary, backgroundColor: palette.primarySoft },
   roleRadio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: palette.primary, alignItems: 'center', justifyContent: 'center' },

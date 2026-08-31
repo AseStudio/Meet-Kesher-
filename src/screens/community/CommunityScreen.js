@@ -36,6 +36,15 @@ export default function CommunityScreen({ navigation, route }) {
   const [tab, setTab] = useState('channels'); // 'channels' | 'feed'
   const [profile, setProfile] = useState(null);
   const [verified, setVerified] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const loadUnreadCount = async () => {
+    const { count } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('read', false);
+    setUnreadCount(count || 0);
+  };
 
   useEffect(() => {
     (async () => {
@@ -58,7 +67,16 @@ export default function CommunityScreen({ navigation, route }) {
         setVerified(!!verification?.verified);
       }
     })();
+    loadUnreadCount();
   }, []);
+
+  // Refresh the badge whenever this screen regains focus — e.g. coming
+  // back from NotificationsScreen after reading a few, or after a new
+  // reply notification landed while looking at something else.
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', loadUnreadCount);
+    return unsub;
+  }, [navigation]);
 
   const isHost = profile?.role === 'host';
   // Falls back to whichever dashboard passed us here, so this screen
@@ -70,26 +88,40 @@ export default function CommunityScreen({ navigation, route }) {
     <View style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.title}>Community</Text>
-        {tab === 'channels' && isHost && verified && (
+        <View style={styles.topBarActions}>
           <TouchableOpacity
-            style={styles.newChannelBtn}
-            onPress={() => navigation.navigate('CreateChannel')}
-            activeOpacity={0.8}
+            style={styles.bellBtn}
+            onPress={() => navigation.navigate('Notifications')}
+            activeOpacity={0.75}
           >
-            <Ionicons name="add" size={18} color={palette.surface} />
-            <Text style={styles.newChannelBtnText}>New channel</Text>
+            <Ionicons name="notifications-outline" size={21} color={palette.ink} />
+            {unreadCount > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
-        )}
-        {tab === 'feed' && (
-          <TouchableOpacity
-            style={styles.newChannelBtn}
-            onPress={() => navigation.navigate('ComposePost')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="add" size={18} color={palette.surface} />
-            <Text style={styles.newChannelBtnText}>Add a post</Text>
-          </TouchableOpacity>
-        )}
+          {tab === 'channels' && isHost && verified && (
+            <TouchableOpacity
+              style={styles.newChannelBtn}
+              onPress={() => navigation.navigate('CreateChannel')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={18} color={palette.surface} />
+              <Text style={styles.newChannelBtnText}>New channel</Text>
+            </TouchableOpacity>
+          )}
+          {tab === 'feed' && (
+            <TouchableOpacity
+              style={styles.newChannelBtn}
+              onPress={() => navigation.navigate('ComposePost')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={18} color={palette.surface} />
+              <Text style={styles.newChannelBtnText}>Add a post</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <View style={styles.toggleRow}>
@@ -148,6 +180,10 @@ const styles = StyleSheet.create({
 
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 },
   title: { fontSize: 23, fontWeight: '800', color: palette.ink, letterSpacing: -0.4 },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bellBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.line, alignItems: 'center', justifyContent: 'center' },
+  bellBadge: { position: 'absolute', top: -3, right: -3, minWidth: 17, height: 17, borderRadius: 8.5, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: palette.canvas },
+  bellBadgeText: { color: '#fff', fontSize: 9.5, fontWeight: '800' },
   newChannelBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: palette.primary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
   newChannelBtnText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
 
