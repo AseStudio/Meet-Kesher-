@@ -41,19 +41,29 @@ export default function VerifyEmailScreen({ navigation, route }) {
   // button from being spammable from the moment the screen appears.
   const [cooldown, setCooldown] = useState(30);
 
-  const goToDashboard = (user) => {
-    const role = user?.user_metadata?.role || 'attendee';
+  // Never trust user_metadata.role here — email/password sign-up sets
+  // it, but Google sign-up never does, so this used to silently default
+  // every Google user to 'attendee' and hard-reset straight into
+  // AttendeeDashboard, completely bypassing both the real profiles.role
+  // and SelectRoleScreen. profiles.role is the one source of truth
+  // everywhere else in the app (SplashScreen included) — this needs to
+  // match that, not read a field that's only ever populated for one of
+  // the two sign-up paths.
+  const goToDashboard = async (user) => {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!profile?.role) {
+      navigation.reset({ index: 0, routes: [{ name: 'SelectRole' }] });
+      return;
+    }
 
     navigation.reset({
       index: 0,
-      routes: [
-        {
-          name:
-            role === 'host'
-              ? 'HostDashboard'
-              : 'AttendeeDashboard',
-        },
-      ],
+      routes: [{ name: profile.role === 'host' ? 'HostDashboard' : 'AttendeeDashboard' }],
     });
   };
 

@@ -158,6 +158,37 @@ function rankPosts(posts, reactionCounts, commentCounts) {
   return result;
 }
 
+// A <Video> component starts fetching its source the moment it mounts,
+// whether or not anyone actually wants to watch — costly when it's just
+// scrolled into view in a feed. This defers that entirely: show a
+// tappable placeholder first, only mount the real player (and let its
+// network fetch actually begin) once someone taps it. Defined at module
+// level, not inside FeedTab's renderItem, so it keeps a stable
+// component identity across re-renders — an inline component redefined
+// every render would remount on every parent re-render and forget
+// `tapped` each time.
+function LazyVideoCard({ uri, style }) {
+  const [tapped, setTapped] = useState(false);
+
+  if (!tapped) {
+    return (
+      <TouchableOpacity style={[style, styles.videoPlaceholder]} onPress={() => setTapped(true)} activeOpacity={0.85}>
+        <Ionicons name="play-circle" size={46} color="rgba(255,255,255,0.92)" />
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <Video
+      source={{ uri }}
+      style={style}
+      useNativeControls
+      resizeMode={ResizeMode.CONTAIN}
+      shouldPlay
+    />
+  );
+}
+
 function getInitials(name) {
   return (name || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -191,25 +222,36 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   const load = useCallback(async (isRefresh) => {
     isRefresh ? setRefreshing(true) : setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // getSession() reads the already-established session from local
+      // storage — no network round trip. getUser() (the old version)
+      // makes an actual server call to re-validate the JWT every single
+      // time this ran, which is unnecessary here: being on this screen
+      // at all already implies a valid session exists.
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return;
       setUserId(user.id);
 
-      const { data: draftRows } = await supabase
-        .from('feed_posts')
-        .select('*')
-        .eq('author_id', user.id)
-        .eq('status', 'draft')
-        .order('created_at', { ascending: false });
+      // Drafts and published posts don't depend on each other — only on
+      // user.id, which we already have — so there's no reason to wait
+      // for one before starting the other.
+      const [{ data: draftRows }, { data: publishedRows, error }] = await Promise.all([
+        supabase
+          .from('feed_posts')
+          .select('*')
+          .eq('author_id', user.id)
+          .eq('status', 'draft')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('feed_posts')
+          .select('*, channels(name), profiles(full_name), feed_post_media(url, position)')
+          .eq('status', 'published')
+          .order('created_at', { ascending: false })
+          .limit(50),
+      ]);
+      if (error) throw error;
       setDrafts(draftRows || []);
 
-      const { data: publishedRows, error } = await supabase
-        .from('feed_posts')
-        .select('*, channels(name), profiles(full_name), feed_post_media(url, position)')
-        .eq('status', 'published')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
       // feed_post_media comes back unordered from the embed — sort by
       // position client-side rather than fighting PostgREST's embedded-
       // resource ordering syntax for something this small.
@@ -224,21 +266,17 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       let cCounts = {};
 
       if (postIds.length > 0) {
-        // One query covers both "did I like this" and "how many likes
-        // total" — no per-post follow-up queries, no DB view/RPC needed.
-        const { data: reactionRows } = await supabase
-          .from('feed_post_reactions')
-          .select('post_id, user_id')
-          .in('post_id', postIds);
+        // Same reasoning — reactions and comments only depend on
+        // postIds, not on each other, so fetch both at once instead of
+        // one after the other.
+        const [{ data: reactionRows }, { data: commentRows }] = await Promise.all([
+          supabase.from('feed_post_reactions').select('post_id, user_id').in('post_id', postIds),
+          supabase.from('feed_post_comments').select('post_id').in('post_id', postIds),
+        ]);
         (reactionRows || []).forEach((r) => {
           counts[r.post_id] = (counts[r.post_id] || 0) + 1;
           if (r.user_id === user.id) mine.add(r.post_id);
         });
-
-        const { data: commentRows } = await supabase
-          .from('feed_post_comments')
-          .select('post_id')
-          .in('post_id', postIds);
         (commentRows || []).forEach((c) => {
           cCounts[c.post_id] = (cCounts[c.post_id] || 0) + 1;
         });
@@ -491,12 +529,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
                 )}
 
                 {item.media_type === 'video' && item.feed_post_media?.[0]?.url && (
-                  <Video
-                    source={{ uri: item.feed_post_media[0].url }}
-                    style={styles.postVideo}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                  />
+                  <LazyVideoCard uri={item.feed_post_media[0].url} style={styles.postVideo} />
                 )}
 
                 {!isPromo && (
@@ -570,6 +603,7 @@ const styles = StyleSheet.create({
   mediaScrollRow: { marginTop: 10 },
   multiImage: { width: SCREEN_WIDTH * 0.55, aspectRatio: 1, borderRadius: 12, marginRight: 8, backgroundColor: palette.line },
   postVideo: { width: '100%', aspectRatio: 16 / 9, borderRadius: 12, marginTop: 10, backgroundColor: '#000' },
+  videoPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 10 },
   reactionRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reactionText: { fontSize: 12.5, color: palette.neutralText, fontWeight: '600' },
