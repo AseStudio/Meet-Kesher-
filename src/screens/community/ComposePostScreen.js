@@ -6,49 +6,37 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 
+// Vibrant Purple + White palette
 const palette = {
-  primary: colors.primary,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  danger: colors.red,
-  neutralText: colors.grey,
+  primary:       '#7C3AED',   // vibrant violet
+  primaryDeep:   '#5B21B6',   // deep purple
+  primarySoft:   '#F5F3FF',   // very light purple
+  primarySoft2:  '#EDE9FE',   // slightly stronger soft purple
+  ink:           '#1E1B4B',   // deep indigo-black
+  inkMuted:      '#6B7280',
+  surface:       '#FFFFFF',
+  canvas:        '#FAFAFF',   // almost white with a tiny purple tint
+  line:          '#E9E5FF',
+  danger:        '#EF4444',
+  neutralText:   '#9CA3AF',
 };
 
 const MAX_LEN = 500;
 const MAX_IMAGES = 6;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB per photo
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_SECONDS = 30;
 
-/**
- * Three post shapes, one composer: text-only, text + photo(s), or
- * text + a single video — photos and video are mutually exclusive,
- * same as Facebook, since mixing them in one post doesn't map cleanly
- * onto a single feed card. Picking one clears the other.
- *
- * Editing an existing post only ever touches the body text — the media
- * picker is hidden in edit mode. Letting someone swap out photos/video
- * on a post that's already live means diffing old vs new attachments,
- * partial uploads, orphaned storage files if it fails halfway — real
- * complexity for a v1 that doesn't need it yet. Delete and repost is
- * the escape hatch until that's worth building.
- */
 export default function ComposePostScreen({ navigation, route }) {
   const editingPost = route?.params?.post || null;
   const isEditing = !!editingPost;
   const [body, setBody] = useState(editingPost?.body || '');
-  const [images, setImages] = useState([]); // [{ uri, name, size, mimeType }]
-  const [video, setVideo] = useState(null); // { uri, name, size, mimeType }
-  const [pendingVideo, setPendingVideo] = useState(null); // candidate awaiting duration check
+  const [images, setImages] = useState([]);
+  const [video, setVideo] = useState(null);
+  const [pendingVideo, setPendingVideo] = useState(null);
   const [checkingVideo, setCheckingVideo] = useState(false);
   const [posting, setPosting] = useState(false);
 
@@ -72,7 +60,7 @@ export default function ComposePostScreen({ navigation, route }) {
       }
       const valid = assets.filter((a) => !a.size || a.size <= MAX_IMAGE_BYTES);
 
-      setVideo(null); // photos and video are mutually exclusive
+      setVideo(null);
       setImages((prev) => [...prev, ...valid].slice(0, MAX_IMAGES));
     } catch (e) {
       showAlert('Could not open photo picker', e.message);
@@ -95,12 +83,7 @@ export default function ComposePostScreen({ navigation, route }) {
         return;
       }
 
-      // expo-document-picker doesn't hand back duration — only a real
-      // player knows that, so a hidden, invisible <Video> below briefly
-      // loads the file just to read status.durationMillis, then
-      // discards itself. checkingVideo covers that brief window so the
-      // Video/Photo buttons don't look like they silently did nothing.
-      setImages([]); // photos and video are mutually exclusive
+      setImages([]);
       setCheckingVideo(true);
       setPendingVideo(asset);
     } catch (e) {
@@ -128,9 +111,6 @@ export default function ComposePostScreen({ navigation, route }) {
 
   const removeImage = (idx) => setImages((prev) => prev.filter((_, i) => i !== idx));
 
-  // asset.uri is a local file:// URI on native, a blob: URI on web —
-  // same fetch()+blob() trick SubmitFile.js already relies on turns
-  // either into what supabase-js storage upload() expects.
   const uploadAsset = async (asset, userId) => {
     const timestamp = Date.now();
     const rand = Math.round(Math.random() * 1e6);
@@ -207,53 +187,60 @@ export default function ComposePostScreen({ navigation, route }) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {/* Grabber */}
       <View style={styles.grabberWrap}>
         <View style={styles.grabber} />
       </View>
 
+      {/* Header */}
       <View style={styles.topRow}>
         <TouchableOpacity onPress={() => navigation.goBack()} activeOpacity={0.7} style={styles.cancelBtn}>
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>{isEditing ? 'Edit Post' : 'Add a Post'}</Text>
+
+        <Text style={styles.title}>{isEditing ? 'Edit Post' : 'Create Post'}</Text>
+
         <TouchableOpacity
           onPress={handlePost}
           disabled={!canPost}
           activeOpacity={0.85}
           style={[styles.postBtn, !canPost && styles.postBtnDisabled]}
         >
-          {posting
-            ? <ActivityIndicator size="small" color={palette.surface} />
-            : <Text style={styles.postBtnText}>{isEditing ? 'Save' : 'Post'}</Text>
-          }
+          {posting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.postBtnText}>{isEditing ? 'Save' : 'Post'}</Text>
+          )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <TextInput
           style={styles.input}
-          placeholder="What's happening?"
+          placeholder="What's on your mind?"
           placeholderTextColor={palette.neutralText}
           value={body}
           onChangeText={setBody}
           multiline
           autoFocus={!isEditing}
-          maxLength={MAX_LEN + 20 /* soft cap — real cap enforced by canPost so a paste over the limit doesn't just get silently truncated mid-word */}
+          maxLength={MAX_LEN + 20}
         />
 
+        {/* Image previews */}
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaRow}>
             {images.map((img, i) => (
               <View key={img.uri + i} style={styles.imageThumbWrap}>
                 <Image source={{ uri: img.uri }} style={styles.imageThumb} />
                 <TouchableOpacity style={styles.removeMediaBtn} onPress={() => removeImage(i)} activeOpacity={0.8}>
-                  <Ionicons name="close" size={13} color={palette.surface} />
+                  <Ionicons name="close" size={13} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
             ))}
           </ScrollView>
         )}
 
+        {/* Checking video */}
         {checkingVideo && (
           <View style={styles.videoCard}>
             <ActivityIndicator size="small" color={palette.primary} />
@@ -261,6 +248,7 @@ export default function ComposePostScreen({ navigation, route }) {
           </View>
         )}
 
+        {/* Selected video */}
         {video && (
           <View style={styles.videoCard}>
             <View style={styles.videoIconWrap}>
@@ -268,21 +256,26 @@ export default function ComposePostScreen({ navigation, route }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.videoName} numberOfLines={1}>{video.name}</Text>
-              {video.size ? <Text style={styles.videoSize}>{Math.round(video.size / (1024 * 1024))}MB</Text> : null}
+              {video.size ? (
+                <Text style={styles.videoSize}>{Math.round(video.size / (1024 * 1024))}MB</Text>
+              ) : null}
             </View>
             <TouchableOpacity style={styles.removeVideoBtn} onPress={() => setVideo(null)} activeOpacity={0.7}>
-              <Ionicons name="close" size={16} color={palette.neutralText} />
+              <Ionicons name="close" size={16} color={palette.inkMuted} />
             </TouchableOpacity>
           </View>
         )}
 
         {isEditing && editingPost?.media_type && (
           <Text style={styles.editMediaNote}>
-            {editingPost.media_type === 'video' ? 'This post\'s video' : 'This post\'s photos'} can't be changed — delete and repost if you need to swap it out.
+            {editingPost.media_type === 'video'
+              ? "This post's video can't be changed — delete and repost if you need to swap it."
+              : "This post's photos can't be changed — delete and repost if you need to swap them."}
           </Text>
         )}
       </ScrollView>
 
+      {/* Hidden video probe */}
       {pendingVideo && (
         <Video
           source={{ uri: pendingVideo.uri }}
@@ -292,19 +285,44 @@ export default function ComposePostScreen({ navigation, route }) {
         />
       )}
 
+      {/* Footer */}
       <View style={styles.footer}>
         {!isEditing && (
           <View style={styles.mediaButtons}>
-            <TouchableOpacity style={styles.mediaBtn} onPress={pickImages} activeOpacity={0.7} disabled={!!video}>
-              <Ionicons name="image-outline" size={19} color={video ? palette.line : palette.primary} />
-              <Text style={[styles.mediaBtnText, video && { color: palette.line }]}>Photo</Text>
+            <TouchableOpacity
+              style={styles.mediaBtn}
+              onPress={pickImages}
+              activeOpacity={0.7}
+              disabled={!!video}
+            >
+              <Ionicons
+                name="image-outline"
+                size={20}
+                color={video ? palette.line : palette.primary}
+              />
+              <Text style={[styles.mediaBtnText, video && { color: palette.line }]}>
+                Photo
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.mediaBtn} onPress={pickVideo} activeOpacity={0.7} disabled={images.length > 0}>
-              <Ionicons name="videocam-outline" size={19} color={images.length > 0 ? palette.line : palette.primary} />
-              <Text style={[styles.mediaBtnText, images.length > 0 && { color: palette.line }]}>Video</Text>
+
+            <TouchableOpacity
+              style={styles.mediaBtn}
+              onPress={pickVideo}
+              activeOpacity={0.7}
+              disabled={images.length > 0}
+            >
+              <Ionicons
+                name="videocam-outline"
+                size={20}
+                color={images.length > 0 ? palette.line : palette.primary}
+              />
+              <Text style={[styles.mediaBtnText, images.length > 0 && { color: palette.line }]}>
+                Video
+              </Text>
             </TouchableOpacity>
           </View>
         )}
+
         <Text style={[styles.counter, remaining < 0 && styles.counterOver]}>
           {remaining}
         </Text>
@@ -314,57 +332,189 @@ export default function ComposePostScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.canvas },
-  grabberWrap: { alignItems: 'center', paddingTop: 10 },
-  grabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: palette.line },
+  container: {
+    flex: 1,
+    backgroundColor: palette.canvas,
+  },
+  grabberWrap: {
+    alignItems: 'center',
+    paddingTop: 12,
+  },
+  grabber: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: palette.primarySoft2,
+  },
 
   topRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 12,
   },
-  cancelBtn: { paddingVertical: 6, paddingRight: 8 },
-  cancelText: { fontSize: 14.5, color: palette.inkMuted, fontWeight: '600' },
-  title: { fontSize: 15.5, fontWeight: '800', color: palette.ink },
-  postBtn: { backgroundColor: palette.primary, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 8, minWidth: 64, alignItems: 'center' },
-  postBtnDisabled: { opacity: 0.4 },
-  postBtnText: { color: palette.surface, fontWeight: '800', fontSize: 13.5 },
+  cancelBtn: {
+    paddingVertical: 6,
+    paddingRight: 8,
+  },
+  cancelText: {
+    fontSize: 15,
+    color: palette.inkMuted,
+    fontWeight: '600',
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: palette.ink,
+    letterSpacing: -0.3,
+  },
+  postBtn: {
+    backgroundColor: palette.primary,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    minWidth: 72,
+    alignItems: 'center',
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  postBtnDisabled: {
+    opacity: 0.38,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  postBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
+  },
 
-  body: { flex: 1, paddingHorizontal: 18, paddingTop: 6 },
+  body: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
   input: {
-    fontSize: 17, color: palette.ink, fontWeight: '500',
-    lineHeight: 24, textAlignVertical: 'top', outlineStyle: 'none',
-    minHeight: 100,
+    fontSize: 18,
+    color: palette.ink,
+    fontWeight: '500',
+    lineHeight: 26,
+    textAlignVertical: 'top',
+    minHeight: 110,
   },
 
-  mediaRow: { marginTop: 12 },
-  imageThumbWrap: { marginRight: 10 },
-  imageThumb: { width: 84, height: 84, borderRadius: 12, backgroundColor: palette.line },
+  mediaRow: {
+    marginTop: 16,
+  },
+  imageThumbWrap: {
+    marginRight: 12,
+  },
+  imageThumb: {
+    width: 92,
+    height: 92,
+    borderRadius: 16,
+    backgroundColor: palette.line,
+  },
   removeMediaBtn: {
-    position: 'absolute', top: -6, right: -6,
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center',
+    position: 'absolute',
+    top: -7,
+    right: -7,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   videoCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: palette.primarySoft, borderRadius: 14, padding: 12, marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: palette.primarySoft,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: palette.primarySoft2,
   },
-  videoIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center' },
-  videoName: { fontSize: 13.5, fontWeight: '700', color: palette.ink },
-  videoSize: { fontSize: 11.5, color: palette.inkMuted, marginTop: 2 },
-  removeVideoBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  videoIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: palette.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: palette.ink,
+  },
+  videoSize: {
+    fontSize: 12,
+    color: palette.inkMuted,
+    marginTop: 2,
+  },
+  removeVideoBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  editMediaNote: { fontSize: 12, color: palette.neutralText, marginTop: 12, fontStyle: 'italic' },
+  editMediaNote: {
+    fontSize: 13,
+    color: palette.neutralText,
+    marginTop: 16,
+    fontStyle: 'italic',
+    lineHeight: 18,
+  },
 
-  hiddenProbe: { position: 'absolute', width: 1, height: 1, opacity: 0, top: -9999 },
+  hiddenProbe: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+    top: -9999,
+  },
 
   footer: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 18, paddingBottom: 18, paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 22,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: palette.line,
   },
-  mediaButtons: { flexDirection: 'row', gap: 18 },
-  mediaBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  mediaBtnText: { fontSize: 13, fontWeight: '700', color: palette.primary },
-  counter: { fontSize: 12, color: palette.neutralText, fontWeight: '600' },
-  counterOver: { color: palette.danger },
+  mediaButtons: {
+    flexDirection: 'row',
+    gap: 22,
+  },
+  mediaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mediaBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: palette.primary,
+  },
+  counter: {
+    fontSize: 13,
+    color: palette.neutralText,
+    fontWeight: '600',
+  },
+  counterOver: {
+    color: palette.danger,
+  },
 });
