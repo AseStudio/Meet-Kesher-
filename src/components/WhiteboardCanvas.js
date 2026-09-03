@@ -24,8 +24,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { captureRef } from 'react-native-view-shot';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { supabase } from '../lib/supabase';
+import { useResponsive } from '../lib/responsive';
 
 /**
  * WhiteboardCanvas
@@ -75,36 +77,94 @@ const THEMES = {
     textColor: colors.text,
     subtleText: 'rgba(0,0,0,0.5)',
     accent: colors.primary,
+    accentSoft: '#F0ECFF',
     palette: penColors,
     defaultColor: '#000000',
     toolbarBg: colors.white,
     toolbarBorder: colors.greyLight,
-    toolBg: colors.greyLight,
-    toolLabelColor: colors.text,
+    toolBg: '#F4F3FA',
+    toolBorder: colors.greyLight,
+    toolIconColor: colors.text,
+    toolLabelColor: colors.textLight,
+    toolIconColorActive: colors.white,
+    toolLabelColorActive: colors.white,
     panelBg: colors.white,
+    panelBorder: colors.greyLight,
+    swatchBorder: '#E2E0F2',
     penToolLabel: 'Pen',
+    shadow: true,
   },
   blackboard: {
     label: 'Blackboard',
     canvasBg: '#2D5A2D',
-    containerBg: '#1A3A1A',
-    topBarBg: '#0F2A0F',
-    topBarBorder: '#2A5A2A',
+    containerBg: '#173317',
+    topBarBg: '#123112',
+    topBarBorder: '#2E5C2E',
     textColor: '#FFFFFF',
     subtleText: 'rgba(255,255,255,0.6)',
-    accent: '#4A8A4A',
+    accent: '#4FA84F',
+    accentSoft: 'rgba(79,168,79,0.22)',
     palette: chalkColors,
     defaultColor: '#FFFFFF',
-    toolbarBg: '#0F2A0F',
-    toolbarBorder: '#2A5A2A',
-    toolBg: '#2D5A2D',
-    toolLabelColor: 'rgba(255,255,255,0.85)',
-    panelBg: '#0F2A0F',
+    toolbarBg: '#123112',
+    toolbarBorder: '#2E5C2E',
+    toolBg: 'rgba(255,255,255,0.08)',
+    toolBorder: 'rgba(255,255,255,0.12)',
+    toolIconColor: 'rgba(255,255,255,0.85)',
+    toolLabelColor: 'rgba(255,255,255,0.6)',
+    toolIconColorActive: '#0F2A0F',
+    toolLabelColorActive: '#0F2A0F',
+    panelBg: '#173317',
+    panelBorder: 'rgba(255,255,255,0.12)',
+    swatchBorder: 'rgba(255,255,255,0.25)',
     penToolLabel: 'Chalk',
+    shadow: false,
   },
 };
 
 const SHAPE_TOOLS = ['rect', 'circle', 'line', 'arrow', 'text'];
+
+// Real iconography instead of emoji glyphs — emoji render inconsistently
+// across iOS/Android/web (different glyph sets, sizes, baseline offsets),
+// which is what made the old toolbar look unpolished/basic. One lookup
+// table so every tool button, in every theme, draws from the same icon
+// set as the rest of the app (Ionicons/MaterialCommunityIcons, same as
+// lib/iconMeta.js).
+function ToolIcon({ name, size, color }) {
+  const MCI_ICONS = {
+    highlighter: 'marker',
+    eraser: 'eraser-variant',
+    text: 'format-text',
+    line: 'vector-line',
+  };
+  if (MCI_ICONS[name]) {
+    return <MaterialCommunityIcons name={MCI_ICONS[name]} size={size} color={color} />;
+  }
+  const ION_ICONS = {
+    pen: 'pencil',
+    shapes: 'shapes-outline',
+    rect: 'square-outline',
+    circle: 'ellipse-outline',
+    arrow: 'arrow-forward-outline',
+    laser: 'flashlight-outline',
+    select: 'move-outline',
+    undo: 'arrow-undo-outline',
+    redo: 'arrow-redo-outline',
+    clear: 'trash-outline',
+    save: 'download-outline',
+    resetView: 'scan-outline',
+    image: 'image-outline',
+    document: 'document-text-outline',
+    lockClosed: 'lock-closed-outline',
+    lockOpen: 'lock-open-outline',
+    close: 'close-outline',
+    add: 'add-outline',
+    chevronDown: 'chevron-down-outline',
+    back: 'arrow-back-outline',
+    minimize: 'chevron-down-outline',
+  };
+  return <Ionicons name={ION_ICONS[name] || 'ellipse-outline'} size={size} color={color} />;
+}
 
 // ---------------------------------------------------------------------------
 // Geometry / smoothing helpers
@@ -217,6 +277,7 @@ export default function WhiteboardCanvas({
   const sessionId = session?.id;
   const userId = currentUser?.id ?? 'me';
   const userName = currentUser?.name ?? 'You';
+  const { scale } = useResponsive();
 
   // ---- Pages / boards (#4) -------------------------------------------------
   const [pages, setPages] = useState([]);
@@ -276,6 +337,20 @@ export default function WhiteboardCanvas({
     const { width, height } = e.nativeEvent.layout;
     if (width > 0 && height > 0) setCanvasSize({ width, height });
   };
+
+  // ---- Measured chrome heights ---------------------------------------------------
+  // The floating color palette and shapes/export menus used to be pinned at
+  // hardcoded pixel offsets (`top: 90`, `bottom: 90`). That only happened to
+  // line up when the header was exactly one row tall and the toolbar was
+  // exactly one fixed size — as soon as the pages dropdown or the view-only
+  // banner appeared, or the toolbar grew/shrank on a bigger/smaller screen,
+  // the palette either overlapped the header or floated in empty space. We
+  // measure the real heights instead so these panels always dock right
+  // against the actual edge of the header/toolbar, on any screen.
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const onHeaderLayout = (e) => setHeaderHeight(e.nativeEvent.layout.height);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
+  const onToolbarLayout = (e) => setToolbarHeight(e.nativeEvent.layout.height);
 
   // ---- Infinite canvas: pan/zoom (#10) --------------------------------------------
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 });
@@ -789,66 +864,88 @@ export default function WhiteboardCanvas({
   const activePage = pages.find((p) => p.id === activePageId);
   const containerStyle = mode === 'embedded' ? styles.embeddedContainer : styles.fullscreenContainer;
 
+  const iconBtnSize = scale(30);
+  const headerIconSize = Math.max(15, scale(15));
+
   return (
     <View style={[containerStyle, { backgroundColor: T.containerBg }]}>
-      {/* Top bar */}
-      <View style={[styles.topBar, { backgroundColor: T.topBarBg, borderBottomColor: T.topBarBorder }]}>
-        <TouchableOpacity onPress={onRequestClose}>
-          <Text style={[styles.backText, { color: T.accent }]}>{mode === 'embedded' ? '▾ Minimize' : '← Back'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setPagesMenuOpen((v) => !v)}>
-          <Text style={[styles.title, { color: T.textColor }]}>{activePage?.name ?? T.label} ▾</Text>
-        </TouchableOpacity>
-        <View style={styles.topBarRight}>
-          {boardLocked && <Text style={styles.lockBadge}>🔒 Locked</Text>}
-          {isHost && (
-            <TouchableOpacity onPress={toggleLock} style={[styles.lockToggle, { backgroundColor: T.toolBg }]}>
-              <Text style={[styles.lockToggleText, { color: T.textColor }]}>{boardLocked ? 'Unlock' : 'Lock'}</Text>
-            </TouchableOpacity>
-          )}
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE</Text>
-          </View>
-        </View>
-      </View>
+      {/* Header stack — top bar + optional pages dropdown + optional
+          view-only banner, measured as one block so floating panels below
+          (color palette, shapes menu) can dock against its real bottom
+          edge instead of a hardcoded guess. */}
+      <View onLayout={onHeaderLayout}>
+        <View style={[styles.topBar, { backgroundColor: T.topBarBg, borderBottomColor: T.topBarBorder }]}>
+          <TouchableOpacity
+            onPress={onRequestClose}
+            style={[styles.iconBtn, { width: iconBtnSize, height: iconBtnSize, borderRadius: iconBtnSize / 2, backgroundColor: T.toolBg }]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ToolIcon name={mode === 'embedded' ? 'minimize' : 'back'} size={headerIconSize} color={T.accent} />
+          </TouchableOpacity>
 
-      {/* Pages dropdown (#4) */}
-      {pagesMenuOpen && (
-        <View style={[styles.pagesMenu, { backgroundColor: T.panelBg, borderBottomColor: T.topBarBorder }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {pages.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.pageChip, { backgroundColor: T.toolBg }, p.id === activePageId && { backgroundColor: T.accent }]}
-                onPress={() => {
-                  setActivePageId(p.id);
-                  setPagesMenuOpen(false);
-                }}
-              >
-                <Text style={[p.id === activePageId ? styles.pageChipTextActive : styles.pageChipText, { color: p.id === activePageId ? '#fff' : T.textColor }]}>{p.name}</Text>
-              </TouchableOpacity>
-            ))}
+          <TouchableOpacity style={styles.titleBtn} onPress={() => setPagesMenuOpen((v) => !v)}>
+            <Text style={[styles.title, { color: T.textColor }]} numberOfLines={1}>{activePage?.name ?? T.label}</Text>
+            <ToolIcon name="chevronDown" size={14} color={T.subtleText} />
+          </TouchableOpacity>
+
+          <View style={styles.topBarRight}>
+            {boardLocked && (
+              <View style={styles.lockBadge}>
+                <ToolIcon name="lockClosed" size={11} color={colors.red} />
+                <Text style={styles.lockBadgeText}>Locked</Text>
+              </View>
+            )}
             {isHost && (
-              <TouchableOpacity style={[styles.addPageChip, { borderColor: T.accent }]} onPress={addPage}>
-                <Text style={[styles.addPageChipText, { color: T.accent }]}>+ Add board</Text>
+              <TouchableOpacity onPress={toggleLock} style={[styles.lockToggle, { backgroundColor: T.toolBg, borderColor: T.toolBorder }]}>
+                <ToolIcon name={boardLocked ? 'lockOpen' : 'lockClosed'} size={12} color={T.textColor} />
+                <Text style={[styles.lockToggleText, { color: T.textColor }]}>{boardLocked ? 'Unlock' : 'Lock'}</Text>
               </TouchableOpacity>
             )}
-          </ScrollView>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>LIVE</Text>
+            </View>
+          </View>
         </View>
-      )}
 
-      {!effectiveCanDraw && (
-        <View style={styles.viewOnlyBanner}>
-          <Text style={styles.viewOnlyText}>
-            {isHost
-              ? "You're in view-only mode — tap Interrupt to take over"
-              : boardLocked
-              ? 'Board is locked by the host'
-              : "You're in view-only mode"}
-          </Text>
-        </View>
-      )}
+        {/* Pages dropdown (#4) */}
+        {pagesMenuOpen && (
+          <View style={[styles.pagesMenu, { backgroundColor: T.panelBg, borderBottomColor: T.topBarBorder }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pagesMenuContent}>
+              {pages.map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[styles.pageChip, { backgroundColor: T.toolBg, borderColor: T.toolBorder }, p.id === activePageId && { backgroundColor: T.accent, borderColor: T.accent }]}
+                  onPress={() => {
+                    setActivePageId(p.id);
+                    setPagesMenuOpen(false);
+                  }}
+                >
+                  <Text style={[styles.pageChipText, { color: p.id === activePageId ? '#fff' : T.textColor }]}>{p.name}</Text>
+                </TouchableOpacity>
+              ))}
+              {isHost && (
+                <TouchableOpacity style={[styles.addPageChip, { borderColor: T.accent }]} onPress={addPage}>
+                  <ToolIcon name="add" size={14} color={T.accent} />
+                  <Text style={[styles.addPageChipText, { color: T.accent }]}>Add board</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
+        {!effectiveCanDraw && (
+          <View style={styles.viewOnlyBanner}>
+            <Text style={styles.viewOnlyText}>
+              {isHost
+                ? "You're in view-only mode — tap Interrupt to take over"
+                : boardLocked
+                ? 'Board is locked by the host'
+                : "You're in view-only mode"}
+            </Text>
+          </View>
+        )}
+      </View>
 
       {/* Canvas, wrapped for pinch/pan (#10) and export capture (#9) */}
       <PinchGestureHandler
@@ -915,24 +1012,41 @@ export default function WhiteboardCanvas({
         </PanGestureHandler>
       </PinchGestureHandler>
 
-      {/* Floating color palette */}
+      {/* Floating color palette — docked against the real bottom edge of
+          the measured header, and clamped so it can never run off the
+          right edge of a narrow screen (the old fixed `right: 12` and
+          `top: 90` combo is what used to leave it misaligned). */}
       {colorMenuOpen && (
-        <View style={[styles.colorPalette, { backgroundColor: T.panelBg }]}>
-          {T.palette.map((c) => (
-            <TouchableOpacity
-              key={c}
-              style={[styles.colorSwatch, { backgroundColor: c }, activeColor === c && styles.colorSwatchActive]}
-              onPress={() => setActiveColor(c)}
-            />
-          ))}
+        <View style={[styles.colorPalette, { top: headerHeight + 10, backgroundColor: T.panelBg, borderColor: T.panelBorder }]}>
+          <View style={styles.colorPaletteHeader}>
+            <Text style={[styles.colorPaletteTitle, { color: T.subtleText }]}>Color & size</Text>
+            <TouchableOpacity onPress={() => setColorMenuOpen(false)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+              <ToolIcon name="close" size={15} color={T.subtleText} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.colorSwatchGrid}>
+            {T.palette.map((c) => (
+              <TouchableOpacity
+                key={c}
+                style={[
+                  styles.colorSwatch,
+                  { width: scale(26), height: scale(26), borderRadius: scale(13), backgroundColor: c, borderColor: T.swatchBorder },
+                  activeColor === c && [styles.colorSwatchActive, { borderColor: T.accent }],
+                ]}
+                onPress={() => setActiveColor(c)}
+              />
+            ))}
+          </View>
+          <View style={[styles.paletteDivider, { backgroundColor: T.panelBorder }]} />
           <View style={styles.brushRow}>
             {brushSizes.map((size) => (
-              <TouchableOpacity key={size} style={[styles.brushBtn, activeBrush === size && styles.brushBtnActive]} onPress={() => setActiveBrush(size)}>
+              <TouchableOpacity
+                key={size}
+                style={[styles.brushBtn, { backgroundColor: T.toolBg }, activeBrush === size && { backgroundColor: T.accentSoft, borderColor: T.accent, borderWidth: 1.5 }]}
+                onPress={() => setActiveBrush(size)}
+              >
                 <View
-                  style={[
-                    styles.brushDot,
-                    { width: size * 2, height: size * 2, borderRadius: size, backgroundColor: activeBrush === size ? T.accent : '#555' },
-                  ]}
+                  style={{ width: size * 1.6, height: size * 1.6, borderRadius: size, backgroundColor: activeBrush === size ? T.accent : T.subtleText }}
                 />
               </TouchableOpacity>
             ))}
@@ -940,26 +1054,30 @@ export default function WhiteboardCanvas({
         </View>
       )}
 
-      {/* Shapes submenu (#5) */}
+      {/* Shapes submenu (#5) — docked above the measured toolbar height */}
       {shapesMenuOpen && (
-        <View style={[styles.shapesMenu, { backgroundColor: T.panelBg }]}>
+        <View style={[styles.shapesMenu, { bottom: toolbarHeight + 12, backgroundColor: T.panelBg, borderColor: T.panelBorder }]}>
           {[
-            ['rect', '▭', 'Rect'],
-            ['circle', '◯', 'Circle'],
-            ['line', '╱', 'Line'],
-            ['arrow', '➜', 'Arrow'],
-            ['text', 'T', 'Text'],
-          ].map(([tool, icon, label]) => (
+            ['rect', 'Rect'],
+            ['circle', 'Circle'],
+            ['line', 'Line'],
+            ['arrow', 'Arrow'],
+            ['text', 'Text'],
+          ].map(([tool, label]) => (
             <TouchableOpacity
               key={tool}
-              style={[styles.toolBtn, { backgroundColor: T.toolBg }, activeTool === tool && { backgroundColor: T.accent }]}
+              style={[
+                styles.toolBtn,
+                { width: scale(58), height: scale(58), backgroundColor: T.toolBg, borderColor: T.toolBorder },
+                activeTool === tool && { backgroundColor: T.accent, borderColor: T.accent },
+              ]}
               onPress={() => {
                 setActiveTool(tool);
                 setShapesMenuOpen(false);
               }}
             >
-              <Text style={styles.toolIcon}>{icon}</Text>
-              <Text style={[styles.toolLabel, { color: T.toolLabelColor }]}>{label}</Text>
+              <ToolIcon name={tool} size={scale(18)} color={activeTool === tool ? T.toolIconColorActive : T.toolIconColor} />
+              <Text style={[styles.toolLabel, { color: activeTool === tool ? T.toolLabelColorActive : T.toolLabelColor }]}>{label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -967,13 +1085,19 @@ export default function WhiteboardCanvas({
 
       {/* Export menu (replaces Alert.alert chooser — unreliable on web) */}
       {exportMenuOpen && (
-        <View style={[styles.shapesMenu, { backgroundColor: T.panelBg }]}>
-          <TouchableOpacity style={[styles.toolBtn, { backgroundColor: T.toolBg }]} onPress={exportPng}>
-            <Text style={styles.toolIcon}>🖼️</Text>
+        <View style={[styles.shapesMenu, { bottom: toolbarHeight + 12, backgroundColor: T.panelBg, borderColor: T.panelBorder }]}>
+          <TouchableOpacity
+            style={[styles.toolBtn, { width: scale(72), height: scale(58), backgroundColor: T.toolBg, borderColor: T.toolBorder }]}
+            onPress={exportPng}
+          >
+            <ToolIcon name="image" size={scale(18)} color={T.toolIconColor} />
             <Text style={[styles.toolLabel, { color: T.toolLabelColor }]}>Save PNG</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.toolBtn, { backgroundColor: T.toolBg }]} onPress={exportSvg}>
-            <Text style={styles.toolIcon}>📄</Text>
+          <TouchableOpacity
+            style={[styles.toolBtn, { width: scale(72), height: scale(58), backgroundColor: T.toolBg, borderColor: T.toolBorder }]}
+            onPress={exportSvg}
+          >
+            <ToolIcon name="document" size={scale(18)} color={T.toolIconColor} />
             <Text style={[styles.toolLabel, { color: T.toolLabelColor }]}>Save SVG</Text>
           </TouchableOpacity>
         </View>
@@ -981,12 +1105,13 @@ export default function WhiteboardCanvas({
 
       {/* Selection actions (#7) */}
       {selectedId && (
-        <View style={styles.selectionBar}>
+        <View style={[styles.selectionBar, { bottom: toolbarHeight + 12 }]}>
           <Text style={styles.selectionText}>1 object selected</Text>
-          <TouchableOpacity onPress={() => removeStroke(selectedId)}>
+          <TouchableOpacity style={styles.selectionAction} onPress={() => removeStroke(selectedId)}>
+            <ToolIcon name="clear" size={14} color="#FF8A8A" />
             <Text style={styles.selectionDelete}>Delete</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setSelectedId(null)}>
+          <TouchableOpacity style={styles.selectionAction} onPress={() => setSelectedId(null)}>
             <Text style={styles.selectionCancel}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -999,20 +1124,21 @@ export default function WhiteboardCanvas({
           showsHorizontalScrollIndicator={false}
           style={[styles.bottomToolbar, { backgroundColor: T.toolbarBg, borderTopColor: T.toolbarBorder }]}
           contentContainerStyle={styles.bottomToolbarContent}
+          onLayout={onToolbarLayout}
         >
-          <ToolButton T={T} icon="✏️" label={T.penToolLabel} active={activeTool === 'pen'} onPress={() => { setActiveTool('pen'); setShapesMenuOpen(false); setColorMenuOpen(true); }} />
-          <ToolButton T={T} icon="🖍️" label="Highlight" active={activeTool === 'highlighter'} onPress={() => { setActiveTool('highlighter'); setShapesMenuOpen(false); }} />
-          <ToolButton T={T} icon="🧽" label="Eraser" active={activeTool === 'eraser'} onPress={() => { setActiveTool('eraser'); setShapesMenuOpen(false); setColorMenuOpen(false); }} />
-          <ToolButton T={T} icon="🔷" label="Shapes" active={SHAPE_TOOLS.includes(activeTool)} onPress={() => setShapesMenuOpen((v) => !v)} />
-          <ToolButton T={T} icon="👉" label="Laser" active={activeTool === 'laser'} onPress={() => { setActiveTool('laser'); setShapesMenuOpen(false); }} />
-          <ToolButton T={T} icon="🖱️" label="Select" active={activeTool === 'select'} onPress={() => { setActiveTool('select'); setShapesMenuOpen(false); }} />
+          <ToolButton T={T} scale={scale} iconName="pen" label={T.penToolLabel} active={activeTool === 'pen'} onPress={() => { setActiveTool('pen'); setShapesMenuOpen(false); setColorMenuOpen(true); }} />
+          <ToolButton T={T} scale={scale} iconName="highlighter" label="Highlight" active={activeTool === 'highlighter'} onPress={() => { setActiveTool('highlighter'); setShapesMenuOpen(false); }} />
+          <ToolButton T={T} scale={scale} iconName="eraser" label="Eraser" active={activeTool === 'eraser'} onPress={() => { setActiveTool('eraser'); setShapesMenuOpen(false); setColorMenuOpen(false); }} />
+          <ToolButton T={T} scale={scale} iconName="shapes" label="Shapes" active={SHAPE_TOOLS.includes(activeTool)} onPress={() => setShapesMenuOpen((v) => !v)} />
+          <ToolButton T={T} scale={scale} iconName="laser" label="Laser" active={activeTool === 'laser'} onPress={() => { setActiveTool('laser'); setShapesMenuOpen(false); }} />
+          <ToolButton T={T} scale={scale} iconName="select" label="Select" active={activeTool === 'select'} onPress={() => { setActiveTool('select'); setShapesMenuOpen(false); }} />
           <View style={[styles.divider, { backgroundColor: T.toolbarBorder }]} />
-          <ToolButton T={T} icon="↩️" label="Undo" onPress={undo} />
-          <ToolButton T={T} icon="↪️" label="Redo" onPress={redo} />
-          <ToolButton T={T} icon="🗑️" label="Clear" danger onPress={clearBoard} />
+          <ToolButton T={T} scale={scale} iconName="undo" label="Undo" onPress={undo} />
+          <ToolButton T={T} scale={scale} iconName="redo" label="Redo" onPress={redo} />
+          <ToolButton T={T} scale={scale} iconName="clear" label="Clear" danger onPress={clearBoard} />
           <View style={[styles.divider, { backgroundColor: T.toolbarBorder }]} />
-          <ToolButton T={T} icon="⬇️" label="Save" onPress={openExportMenu} />
-          <ToolButton T={T} icon="🔍" label="Reset view" onPress={resetView} />
+          <ToolButton T={T} scale={scale} iconName="save" label="Save" onPress={openExportMenu} />
+          <ToolButton T={T} scale={scale} iconName="resetView" label="Reset view" onPress={resetView} />
         </ScrollView>
       )}
 
@@ -1043,20 +1169,24 @@ export default function WhiteboardCanvas({
   );
 }
 
-function ToolButton({ icon, label, active, danger, onPress, T }) {
+function ToolButton({ iconName, label, active, danger, onPress, T, scale = (n) => n }) {
   const theme = T || THEMES.whiteboard;
+  const size = scale(56);
+  const iconColor = danger ? colors.red : active ? theme.toolIconColorActive : theme.toolIconColor;
+  const labelColor = danger ? colors.red : active ? theme.toolLabelColorActive : theme.toolLabelColor;
   return (
     <TouchableOpacity
       style={[
         styles.toolBtn,
-        { backgroundColor: theme.toolBg },
-        active && { backgroundColor: theme.accent },
+        { width: size, height: size, backgroundColor: theme.toolBg, borderColor: theme.toolBorder },
+        active && { backgroundColor: theme.accent, borderColor: theme.accent },
         danger && styles.toolBtnDanger,
       ]}
       onPress={onPress}
+      hitSlop={{ top: 2, bottom: 2, left: 2, right: 2 }}
     >
-      <Text style={styles.toolIcon}>{icon}</Text>
-      <Text style={[styles.toolLabel, { color: theme.toolLabelColor }, danger && styles.toolLabelDanger]}>{label}</Text>
+      <ToolIcon name={iconName} size={scale(18)} color={iconColor} />
+      <Text style={[styles.toolLabel, { color: labelColor }]} numberOfLines={1}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -1136,47 +1266,97 @@ const styles = StyleSheet.create({
     zIndex: 50,
     elevation: 50,
   },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, paddingTop: 40, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.greyLight },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: 40,
+    gap: 10,
+    borderBottomWidth: 1,
+  },
+  iconBtn: { alignItems: 'center', justifyContent: 'center' },
+  titleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  title: { fontSize: 16, fontWeight: '700', maxWidth: 180 },
   topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  backText: { fontSize: 15, color: colors.primary, fontWeight: '600' },
-  title: { fontSize: 17, fontWeight: '700', color: colors.text },
-  lockBadge: { fontSize: 11, color: colors.red, fontWeight: '700' },
-  lockToggle: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: colors.greyLight },
-  lockToggleText: { fontSize: 11, fontWeight: '700', color: colors.text },
+  lockBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#FFE8E8', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8,
+  },
+  lockBadgeText: { fontSize: 11, color: colors.red, fontWeight: '700' },
+  lockToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1,
+  },
+  lockToggleText: { fontSize: 11, fontWeight: '700' },
   liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFE8E8', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red },
   liveText: { color: colors.red, fontSize: 11, fontWeight: '700' },
-  pagesMenu: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.greyLight },
-  pageChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.greyLight, marginRight: 8 },
-  pageChipActive: { backgroundColor: colors.primary },
-  pageChipText: { fontSize: 12, fontWeight: '600', color: colors.text },
-  pageChipTextActive: { fontSize: 12, fontWeight: '600', color: colors.white },
-  addPageChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, borderWidth: 1, borderColor: colors.primary, marginRight: 8 },
-  addPageChipText: { fontSize: 12, fontWeight: '600', color: colors.primary },
+
+  pagesMenu: { paddingVertical: 8, borderBottomWidth: 1 },
+  pagesMenuContent: { paddingHorizontal: 12, alignItems: 'center' },
+  pageChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, borderWidth: 1, marginRight: 8 },
+  pageChipText: { fontSize: 12, fontWeight: '600' },
+  addPageChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1, marginRight: 8,
+  },
+  addPageChipText: { fontSize: 12, fontWeight: '600' },
+
   viewOnlyBanner: { backgroundColor: '#FFF6E5', paddingVertical: 6, alignItems: 'center' },
   viewOnlyText: { fontSize: 12, color: '#8A6D00', fontWeight: '600' },
-  canvas: { flex: 1, backgroundColor: '#FAFAFA', position: 'relative' },
-  colorPalette: { position: 'absolute', top: 90, right: 12, gap: 8, backgroundColor: colors.white, padding: 8, borderRadius: 12, elevation: 4, shadowOpacity: 0.15, shadowRadius: 6 },
-  colorSwatch: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: '#DDD' },
-  colorSwatchActive: { borderColor: colors.primary, borderWidth: 3, transform: [{ scale: 1.15 }] },
-  brushRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
-  brushBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.greyLight, alignItems: 'center', justifyContent: 'center' },
-  brushBtnActive: { backgroundColor: '#F0ECFF', borderWidth: 2, borderColor: colors.primary },
-  brushDot: {},
-  shapesMenu: { position: 'absolute', bottom: 90, left: 12, flexDirection: 'row', gap: 6, backgroundColor: colors.white, padding: 8, borderRadius: 12, elevation: 4, shadowOpacity: 0.15, shadowRadius: 6 },
-  selectionBar: { position: 'absolute', bottom: 90, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: colors.text, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+
+  canvas: { flex: 1, position: 'relative' },
+
+  // ── Floating color palette ──
+  // Positioned via inline `top` (measured header height) rather than a
+  // fixed offset — see onHeaderLayout. Only right/borders/shadow are
+  // fixed here.
+  colorPalette: {
+    position: 'absolute', right: 12, maxWidth: 220,
+    padding: 10, borderRadius: 14, borderWidth: 1,
+    elevation: 6, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    zIndex: 60,
+  },
+  colorPaletteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  colorPaletteTitle: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  colorSwatchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, maxWidth: 160 },
+  colorSwatch: { borderWidth: 2 },
+  colorSwatchActive: { borderWidth: 3, transform: [{ scale: 1.12 }] },
+  paletteDivider: { height: 1, marginVertical: 10 },
+  brushRow: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
+  brushBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+
+  // ── Shapes / export submenu ──
+  shapesMenu: {
+    position: 'absolute', left: 12, flexDirection: 'row', gap: 6,
+    padding: 8, borderRadius: 14, borderWidth: 1,
+    elevation: 6, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    zIndex: 60,
+  },
+
+  // ── Selection bar ──
+  selectionBar: {
+    position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: colors.text, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22,
+    elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    zIndex: 60,
+  },
   selectionText: { color: colors.white, fontSize: 12 },
+  selectionAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   selectionDelete: { color: '#FF8A8A', fontSize: 12, fontWeight: '700' },
   selectionCancel: { color: colors.white, fontSize: 12, fontWeight: '700' },
-  bottomToolbar: { backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.greyLight },
+
+  // ── Bottom toolbar ──
+  bottomToolbar: { borderTopWidth: 1 },
   bottomToolbarContent: { paddingHorizontal: 12, paddingVertical: 10, alignItems: 'center', gap: 8 },
-  toolBtn: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: colors.greyLight, gap: 2, minWidth: 54 },
-  toolBtnActive: { backgroundColor: colors.primary },
-  toolBtnDanger: { backgroundColor: '#FFE8E8' },
-  toolIcon: { fontSize: 16 },
-  toolLabel: { fontSize: 9, color: colors.text, fontWeight: '600' },
-  toolLabelDanger: { color: colors.red },
-  divider: { width: 1, height: 36, backgroundColor: colors.greyLight },
+  toolBtn: { alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, gap: 3 },
+  toolBtnDanger: { backgroundColor: '#FFE8E8', borderColor: '#FFD3D3' },
+  toolLabel: { fontSize: 9, fontWeight: '600', maxWidth: 60 },
+  divider: { width: 1, height: 36, marginHorizontal: 2 },
+
+  // ── Text tool modal ──
   textModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   textModalBox: { width: '80%', backgroundColor: colors.white, borderRadius: 14, padding: 16 },
   textModalLabel: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 8 },

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert,
-  ScrollView, Modal, Platform
+  ScrollView, Modal, Platform, Dimensions, SafeAreaView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -15,6 +15,8 @@ import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
+import { showAlert } from '../../lib/alert';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const REACTIONS = ['👍', '👏', '❤️', '😂', '🔥', '😮'];
 
@@ -32,8 +34,9 @@ const TOOLBAR_H_PADDING = 20; // total horizontal inset the bar reserves
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
-  const { scale, isTablet, isDesktop, width, height } = useResponsive();
-  const styles = useSessionMainStyles(scale);
+  const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
+  const insets = useSafeAreaInsets();
+  const styles = useSessionMainStyles(scale, isSmall, width, height);
 
   // If the host closes the browser tab instead of tapping End, this ends
   // the session immediately so it doesn't keep running as an empty shell.
@@ -44,6 +47,22 @@ export default function SessionMain({ navigation, route }) {
   const [cameraOff, setCameraOff] = useState(false);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
   const [recording, setRecording] = useState(false);
+  // Recording is a Premium perk, and only works on desktop-class web
+  // browsers — getDisplayMedia (what actually captures the session) has
+  // no equivalent in React Native's native runtime at all, and spotty
+  // support even in mobile browsers. Neither of these is knowable until
+  // runtime, so both start false/unknown and get set properly on mount.
+  const [isPremium, setIsPremium] = useState(false);
+  const recordingSupported = Platform.OS === 'web'
+    && typeof navigator !== 'undefined'
+    && !!navigator.mediaDevices?.getDisplayMedia;
+  const mediaRecorderRef = useRef(null);
+  const recordedChunksRef = useRef([]);
+  const recordingStreamRef = useRef(null);
+  // Resolved by MediaRecorder's onstop handler with the final Blob —
+  // read by endSession() below, which needs to wait for that Blob to
+  // actually exist before it can upload anything.
+  const recordingStopResolverRef = useRef(null);
   const [view, setView] = useState('speaker');
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [activeSpeakerUid, setActiveSpeakerUid] = useState(null); // null = default (show host)
@@ -51,10 +70,10 @@ export default function SessionMain({ navigation, route }) {
   const [joined, setJoined] = useState(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
 
-  // Attendee strip visibility — visible on load (so there's something to
-  // see/tap before anyone knows to move the mouse or touch the screen),
-  // then auto-hides after a few seconds of no interaction, and comes back
-  // on tap/hover.
+  // In-session chrome (top bar, toolbar) visibility — visible on load (so
+  // there's something to see/tap before anyone knows to move the mouse or
+  // touch the screen), then auto-hides after a few seconds of no
+  // interaction, and comes back on tap/hover.
   const [controlsVisible, setControlsVisible] = useState(true);
   const controlsHideTimerRef = useRef(null);
   const revealControls = () => {
@@ -70,6 +89,32 @@ export default function SessionMain({ navigation, route }) {
     revealControls();
     return () => {
       if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+    };
+  }, []);
+
+  // Recording is gated on Premium — same is_premium flag the feed
+  // already uses to decide who sees ads. No real payment collection
+  // exists behind it yet (that's still "payments later"), so this
+  // doesn't offset any cost — but recording here is free client-side
+  // capture, not the paid Agora Cloud Recording path, so there's no
+  // cost to offset in the first place.
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('profiles').select('is_premium').eq('id', user.id).maybeSingle();
+      setIsPremium(!!data?.is_premium);
+    })();
+  }, []);
+
+  // Belt-and-suspenders: if this screen unmounts any other way (tab
+  // close, crash, navigating off unexpectedly) while a recording is
+  // still running, stop the underlying stream tracks so the browser's
+  // "sharing this tab" indicator doesn't stay stuck on for a session
+  // that's no longer even being watched.
+  useEffect(() => {
+    return () => {
+      recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
   // PCs/trackpads never fire onTouchStart — there's no finger touching
@@ -205,6 +250,25 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // always read the latest map instead of the stale one captured at mount time.
   const uidToUserRef = useRef({});
   useEffect(() => { uidToUserRef.current = uidToUser; }, [uidToUser]);
+
+  // Guest minute-penalty tracking. Guests have no stable identity to
+  // track individually (no account, no user_id) — so instead of trying
+  // to time each guest precisely, this integrates "how many guests were
+  // present" over time via a periodic tick: every GUEST_TICK_MS, add
+  // (currentGuestCount × elapsedMinutes) to the running total. Read at
+  // session end, halved, and applied against the host's own minute
+  // balance — see endSession() below.
+  const guestCountRef = useRef(0);
+  const guestMinutesAccumulatorRef = useRef(0);
+  const GUEST_TICK_MS = 15000;
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (guestCountRef.current > 0) {
+        guestMinutesAccumulatorRef.current += guestCountRef.current * (GUEST_TICK_MS / 60000);
+      }
+    }, GUEST_TICK_MS);
+    return () => clearInterval(tick);
+  }, []);
   // The 'board-invite-response' handler below is registered once, at mount,
   // inside setupControlChannel — its closure would otherwise always see
   // boardMode/pendingBoardType as they were at mount time (null). Mirror
@@ -414,9 +478,17 @@ function getProfileKey(uplink = 0, downlink = 0) {
         // message here would otherwise pollute the map with a
         // uidToUser[undefined] entry).
         if (payload.agoraUid == null) return;
+        // Only bump the live guest count the first time we hear from
+        // this uid — the same guest's identity could in principle be
+        // re-broadcast, and double-counting them as two guests would
+        // silently inflate the minute-penalty math below.
+        const isNewEntry = !uidToUserRef.current[payload.agoraUid];
+        if (isNewEntry && payload.isGuest) {
+          guestCountRef.current += 1;
+        }
         setUidToUser(prev => ({
           ...prev,
-          [payload.agoraUid]: { userId: payload.userId, name: payload.name, isHost: !!payload.isHost },
+          [payload.agoraUid]: { userId: payload.userId, name: payload.name, isHost: !!payload.isHost, isGuest: !!payload.isGuest },
         }));
         console.log('👤 Identity received:', payload.name, payload.agoraUid);
       })
@@ -553,6 +625,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
       },
       onUserLeft: (uid) => {
         console.log('User left:', uid);
+        // Check isGuest via the ref (up to date, not the possibly-stale
+        // uidToUser state) before clearAttendeeFromAllState runs, since
+        // it doesn't touch this map, but reading via the ref is the
+        // established safe pattern elsewhere in this file regardless.
+        if (uidToUserRef.current[uid]?.isGuest) {
+          guestCountRef.current = Math.max(0, guestCountRef.current - 1);
+        }
         setRemoteUsers(prev => prev.filter(u => u.uid !== uid));
         setActiveSpeakerUid(prev => (prev === uid ? null : prev));
         clearAttendeeFromAllState(uid);
@@ -905,6 +984,69 @@ function getProfileKey(uplink = 0, downlink = 0) {
     }
   };
 
+  // Toggling recording off, whether from the Record button or the
+  // browser's own native "Stop sharing" bar — both end up here, since
+  // both should behave identically from the app's point of view.
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordingStreamRef.current = null;
+    setRecording(false);
+  };
+
+  const toggleRecording = async () => {
+    if (!isPremium) {
+      showAlert('Kesher Premium', 'Recording sessions is a Premium feature. Upgrade from your Profile to record and download your sessions.');
+      return;
+    }
+    if (recording) {
+      stopRecording();
+      return;
+    }
+    if (!recordingSupported) {
+      showAlert('Not available here', "Recording needs a desktop web browser — it isn't supported on this device.");
+      return;
+    }
+    try {
+      // Captures exactly what's on screen — video tiles, whiteboard,
+      // toolbar, everything — rather than trying to manually composite
+      // each participant's Agora video track onto a canvas ourselves.
+      // The host picks "this tab" in the browser's own share picker;
+      // audio: true captures the tab's own playing audio (the other
+      // participants) alongside it.
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        if (recordingStopResolverRef.current) {
+          recordingStopResolverRef.current(blob);
+          recordingStopResolverRef.current = null;
+        }
+      };
+      // If the host stops sharing from the browser's own UI instead of
+      // tapping our Record button, treat it exactly the same way.
+      stream.getVideoTracks()[0].onended = () => stopRecording();
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch (e) {
+      // The host cancelling the share picker throws NotAllowedError —
+      // that's a normal "changed my mind", not a real error worth an alert.
+      if (e?.name !== 'NotAllowedError') {
+        showAlert('Could not start recording', e.message || 'Please try again.');
+      }
+    }
+  };
+
   const endSession = () => {
     // Status update goes FIRST and is checked. This exact function has
     // regressed back to the "leaveAgora first, unguarded, no check" shape
@@ -913,14 +1055,59 @@ function getProfileKey(uplink = 0, downlink = 0) {
     // best-effort Agora cleanup, and checking its result, is what stops a
     // flaky Agora disconnect from silently eating the whole handler again.
     const proceed = async () => {
-      const { error } = await supabase.from('sessions').update({ status: 'ended' }).eq('id', session?.id);
+      const { error } = await supabase.from('sessions').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', session?.id);
       if (error) {
         if (Platform.OS === 'web') window.alert(`Could not end session: ${error.message}`);
         else Alert.alert('Could not end session', error.message);
         return;
       }
+
+      // If a recording is still running, stop it and wait for
+      // MediaRecorder to actually flush the final Blob before doing
+      // anything else — uploading a half-finalized recording would just
+      // produce a corrupt file. Best-effort only: a failed upload here
+      // shouldn't block the host from actually ending the session, which
+      // is why every step below is wrapped so it can only ever leave
+      // recordingPath null on failure, never throw.
+      let recordingPath = null;
+      if (recording) {
+        try {
+          const blob = await new Promise((resolve) => {
+            recordingStopResolverRef.current = resolve;
+            stopRecording();
+          });
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user && blob.size > 0) {
+            const path = `${user.id}/${session.id}_${Date.now()}.webm`;
+            const { error: uploadError } = await supabase.storage
+              .from('session-recordings')
+              .upload(path, blob, { contentType: 'video/webm' });
+            if (!uploadError) {
+              recordingPath = path;
+              await supabase.from('sessions').update({ recording_path: path }).eq('id', session.id);
+            }
+          }
+        } catch (e) {
+          // Best-effort — see comment above. The host still gets their
+          // summary screen even if the recording upload failed.
+        }
+      }
+
+      // Half of accumulated guest presence-minutes comes out of the
+      // host's own balance — this is the actual cost-recovery
+      // mechanism for guests, since there's no way to bill or cap an
+      // individual guest directly (no account, no identity). Best-
+      // effort: a failed call here shouldn't block ending the session.
+      if (guestMinutesAccumulatorRef.current > 0) {
+        try {
+          await supabase.rpc('apply_guest_minute_penalty', {
+            p_guest_minutes: Math.round(guestMinutesAccumulatorRef.current),
+          });
+        } catch (e) {}
+      }
+
       await leaveAgora(); // internally try/caught now — can't block the line above
-      navigation.navigate('EndSession', { session });
+      navigation.navigate('EndSession', { session, recordingPath });
     };
 
     // react-native-web doesn't reliably render Alert.alert's button array —
@@ -958,30 +1145,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
   // Show PiP only when local is NOT on main screen
   const showPiP = !localOnMain && joined;
-
-  // ─── DUPLICATED UIDS (attendee-strip double-attach guard) ───
-  // The attendee strip renders every remote user's VideoTile UNCONDITIONALLY,
-  // regardless of whether those same tracks are ALSO being played elsewhere
-  // on screen right now. Agora's track.play() doesn't clone a stream per
-  // call — handing the same track to two mounted <VideoTile>s at once
-  // causes one of them to go blank/white, since the second play() call
-  // detaches/steals from the first.
-  //
-  // Three places a remote track can be "elsewhere":
-  //   - Board mode: the single mainRemoteUser sits in the floating pipStack.
-  //   - Speaker view: the single mainRemoteUser is the big central tile
-  //     (only when the host isn't the one speaking).
-  //   - Gallery view: EVERY remote user is shown at once in the grid — a
-  //     single featuredUid couldn't express this, since it isn't one
-  //     duplicate, it's all of them, simultaneously, for as long as
-  //     Gallery is open. This was the gap in the previous version.
-  // The strip nulls out the track for any uid in this set and falls back
-  // to that cell's initials avatar instead.
-  const duplicatedUids = boardMode
-    ? new Set(mainRemoteUser ? [mainRemoteUser.uid] : [])
-    : view === 'gallery'
-      ? new Set(remoteUsers.map(u => u.uid))
-      : new Set(!localOnMain && mainRemoteUser ? [mainRemoteUser.uid] : []);
 
   // ─── HOST BOARD PERMISSION ───
   // The host can draw normally when nobody has been called up (a board
@@ -1032,7 +1195,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
     { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
-    { icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: () => setRecording(!recording), red: true },
+    // Free hosts never see this at all — not shown-then-blocked, just
+    // absent. isPremium starts false until the profile fetch resolves,
+    // so this also means the button briefly doesn't exist for a Premium
+    // host in the first instant after mount; that's an acceptable
+    // trade-off for "free users never even see it" over a flash of an
+    // enabled-then-disabled button while the check is in flight.
+    ...(isPremium ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
     { icon: 'power-outline', label: 'End', action: endSession, end: true },
   ];
 
@@ -1044,26 +1213,51 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // into the gaps between them, so a wide landscape screen naturally
   // spreads the buttons out and a narrow portrait screen naturally pulls
   // them close — no separate gap calculation needed.
+  const safeHorizontalPadding = TOOLBAR_H_PADDING + insets.left + insets.right;
+  const availableWidth = width - safeHorizontalPadding;
+  const baseToolSize = Math.max(TOOLBAR_MIN_BTN, (availableWidth / tools.length) * 0.74);
   const toolBtnSize = Math.round(
-    Math.min(TOOLBAR_MAX_BTN, Math.max(TOOLBAR_MIN_BTN, ((width - TOOLBAR_H_PADDING) / tools.length) * 0.74))
+    Math.min(TOOLBAR_MAX_BTN, isSmall ? Math.max(TOOLBAR_MIN_BTN, baseToolSize * 0.85) : baseToolSize)
   );
   // Below this size the label text just gets squished into an unreadable
   // smear — better to drop it and keep the icon legible.
-  const toolShowLabel = toolBtnSize >= 44;
-  const toolIconSize = Math.max(14, Math.round(toolBtnSize * 0.36));
+  const toolShowLabel = toolBtnSize >= (isSmall ? 36 : 44);
+  const toolIconSize = Math.max(14, Math.round(toolBtnSize * (isSmall ? 0.4 : 0.36)));
   // Actual height of the bottom toolbar bar (buttons + their vertical
   // padding) — anything else anchored to the bottom edge (view toggle,
   // interrupt button, self-view PiP) needs to clear this so it doesn't
   // end up sitting under the toolbar the same way the strip/title did.
-  const toolbarBarHeight = toolBtnSize + 16;
+  const toolbarBarHeight = toolBtnSize + 16 + insets.bottom;
+
+  // Calculate adaptive dimensions for different screen sizes
+  const getAdaptiveValue = (baseValue, minScale = 0.7, maxScale = 1.0) => {
+    const rawScale = width / 375; // 375 is baseline width
+    const clampedScale = Math.min(Math.max(rawScale, minScale), maxScale);
+    return Math.round(baseValue * clampedScale);
+  };
+
+  // Adaptive dimensions for small screens
+  const attendeeStripWidth = isSmall ? Math.min(scale(80), width * 0.22) : scale(104);
+  const galleryCellWidth = isSmall ? Math.min(scale(160), width * 0.42) : scale(190);
+  const galleryCellHeight = isSmall ? Math.min(scale(120), height * 0.22) : scale(140);
+  const pipWidth = isSmall ? Math.min(scale(76), width * 0.18) : scale(92);
+  const pipHeight = isSmall ? Math.min(scale(98), height * 0.18) : scale(122);
+  const boardPickerWidth = isSmall ? Math.min(scale(280), width * 0.92) : scale(300);
+  const coHostPanelWidth = isSmall ? Math.min(scale(300), width * 0.92) : scale(320);
+  const dropdownWidth = isSmall ? Math.min(scale(230), width * 0.88) : scale(250);
+  const reactionBtnSize = isSmall ? Math.min(scale(52), width * 0.12) : scale(60);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
       <NotificationToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Top Bar */}
       {controlsVisible && (
-      <View style={styles.topBar} {...revealOnHoverProps}>
+      <View style={[styles.topBar, { 
+        paddingTop: Math.max(insets.top + 8, 20), 
+        paddingLeft: Math.max(insets.left + 8, 12),
+        paddingRight: Math.max(insets.right + 8, 12)
+      }]} {...revealOnHoverProps}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
@@ -1092,94 +1286,22 @@ function getProfileKey(uplink = 0, downlink = 0) {
           alike, not nested inside either branch. Tap a chip to dismiss it
           for everyone (see clearAttendeeSignal). */}
       {controlsVisible && Object.keys(attendeeSignals).length > 0 && (
-        <View style={styles.signalsBar}>
+        <View style={[styles.signalsBar, { 
+          top: 74 + (insets.top > 0 ? insets.top - 10 : 0),
+          paddingLeft: Math.max(insets.left + 8, 12),
+          paddingRight: Math.max(insets.right + 8, 12)
+        }]}>
           {Object.entries(attendeeSignals).map(([uid, info]) => (
             <TouchableOpacity key={uid} style={styles.signalChip} onPress={() => clearAttendeeSignal(uid)}>
-              <Ionicons name={SIGNAL_ICON[info.signal] || 'megaphone-outline'} size={13} color={colors.white} />
+              <Ionicons name={SIGNAL_ICON[info.signal] || 'megaphone-outline'} size={scale(13)} color={colors.white} />
               <Text style={styles.signalChipText} numberOfLines={1}>{info.name}</Text>
-              <Ionicons name="close-outline" size={13} color="rgba(255,255,255,0.6)" />
+              <Ionicons name="close-outline" size={scale(13)} color="rgba(255,255,255,0.6)" />
             </TouchableOpacity>
           ))}
         </View>
       )}
 
       <View style={styles.mainContent}>
-
-        {/* ─── ATTENDEE STRIP — video cells. Hidden by default; tapping
-            anywhere in the video area (see the wrapper below) shows it
-            for a few seconds. Touching the strip itself resets that
-            timer so it doesn't vanish mid-interaction. Also hidden
-            outright in gallery view (every remote user already has their
-            own tile there) and in board mode (users are already shown in
-            the floating pipStack there, and the strip would otherwise
-            cover the board itself). ─── */}
-        {controlsVisible && !boardMode && view !== 'gallery' && (
-        <View style={styles.attendeeStrip} onTouchStart={revealControls} {...revealOnHoverProps}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.stripContent}>
-            {remoteUsers.map((user, i) => {
-              // This user's track is already playing full-size (speaker
-              // view), in the board PiP stack, or in the Gallery grid —
-              // don't hand it to a second VideoTile here too. See
-              // duplicatedUids comment above.
-              const isDuplicated = duplicatedUids.has(user.uid);
-              // This attendee's real camera state, reported over
-              // 'media-state' broadcasts — see attendeeMediaState comment
-              // above for why this has to be threaded through explicitly.
-              const isCameraOff = !!attendeeMediaState[user.uid]?.cameraOff;
-              return (
-              <View key={user.uid} style={styles.stripCell}>
-                {/* Video cell */}
-                <View style={[
-                  styles.stripVideoWrap,
-                  activeSpeakerUid === user.uid && styles.stripVideoWrapActive,
-                ]}>
-                  {/* VideoTile fills absolutely — fixes video not rendering */}
-                  <VideoTile
-                    track={isDuplicated ? null : user.videoTrack}
-                    cameraOff={isDuplicated || isCameraOff}
-                    initials={`U${i + 1}`}
-                    style={StyleSheet.absoluteFillObject}
-                    initialsSize={16}
-                  />
-                  {/* Badge when this attendee currently has board edit access */}
-                  {boardEditors[user.uid] && (
-                    <View style={styles.stripEditingBadge}>
-                      <Ionicons name="create" size={9} color={colors.white} />
-                    </View>
-                  )}
-                  {/* Badge when this attendee is a co-host */}
-                  {coHosts[user.uid] && (
-                    <View style={styles.stripCoHostBadge}>
-                      <Ionicons name="star" size={9} color="#3A2900" />
-                    </View>
-                  )}
-                  {/* Badge when this attendee is currently muted */}
-                  {attendeeMediaState[user.uid]?.muted && (
-                    <View style={styles.stripMutedBadge}>
-                      <Ionicons name="mic-off" size={9} color={colors.white} />
-                    </View>
-                  )}
-                  {/* 3-dot menu */}
-                  <TouchableOpacity
-                    style={styles.stripDotBtn}
-                    onPress={() => setShowDropdown(user.uid)}
-                  >
-                    <Text style={styles.stripDotText}>⋮</Text>
-                  </TouchableOpacity>
-                  {/* Speaking border */}
-                  {activeSpeakerUid === user.uid && (
-                    <View style={[styles.speakingRing, { pointerEvents: 'none' }]} />
-                  )}
-                </View>
-                <Text style={styles.stripName} numberOfLines={1}>
-                  User {i + 1}
-                </Text>
-              </View>
-              );
-            })}
-          </ScrollView>
-        </View>
-        )}
 
         {/* ─── CENTER — Board OR Video ─── */}
         {boardMode ? (
@@ -1298,11 +1420,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   />
                   {iAmSpeaking && <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />}
                 </View>
-                {/* Remote attendees — Gallery view IS the "elsewhere" for
-                    every remote user while it's open (see duplicatedUids
-                    above): this grid stays the primary, full display, and
-                    it's the attendee strip that defers to it, not the
-                    other way around, so nothing changes here. */}
+                {/* Remote attendees — Gallery view is the primary, full
+                    display for every remote user while it's open. */}
                 {remoteUsers.map((user, i) => (
                   <View key={user.uid} style={styles.galleryCell}>
                     <VideoTile
@@ -1662,11 +1781,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
           </View>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
-function useSessionMainStyles(scale) {
+function useSessionMainStyles(scale, isSmall, width, height) {
   return useMemo(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A', position: 'relative' },
   topBar: {
@@ -1674,75 +1793,32 @@ function useSessionMainStyles(scale) {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     padding: 12, paddingTop: 20, backgroundColor: 'rgba(13,13,43,0.68)',
   },
-  sessionTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
-  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 3 },
-  modeBadgeText: { color: colors.white, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
-  topRight: { alignItems: 'flex-end', gap: 4 },
-  recordingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,59,59,0.2)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
-  recordingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.red },
-  recordingText: { color: colors.red, fontSize: 10, fontWeight: '700' },
-  timer: { color: colors.white, fontSize: 17, fontWeight: '700' },
-  liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
-  liveText: { color: colors.green, fontSize: 10, fontWeight: '700' },
+  sessionTitle: { fontSize: scale(15), fontWeight: '700', color: colors.white },
+  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: scale(5), backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: scale(8), paddingVertical: scale(3), borderRadius: scale(10), marginTop: scale(3) },
+  modeBadgeText: { color: colors.white, fontSize: scale(10), fontWeight: '600', textTransform: 'capitalize' },
+  topRight: { alignItems: 'flex-end', gap: scale(4) },
+  recordingBadge: { flexDirection: 'row', alignItems: 'center', gap: scale(4), backgroundColor: 'rgba(255,59,59,0.2)', paddingHorizontal: scale(7), paddingVertical: scale(3), borderRadius: scale(7) },
+  recordingDot: { width: scale(7), height: scale(7), borderRadius: scale(4), backgroundColor: colors.red },
+  recordingText: { color: colors.red, fontSize: scale(10), fontWeight: '700' },
+  timer: { color: colors.white, fontSize: scale(17), fontWeight: '700' },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: scale(4), backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: scale(8), paddingVertical: scale(3), borderRadius: scale(7) },
+  liveDot: { width: scale(7), height: scale(7), borderRadius: scale(4), backgroundColor: colors.green },
+  liveText: { color: colors.green, fontSize: scale(10), fontWeight: '700' },
   signalsBar: {
-    position: 'absolute', top: 74, left: 0, right: 0, zIndex: 55,
-    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 8, backgroundColor: 'rgba(18,18,58,0.68)',
+    position: 'absolute', left: 0, right: 0, zIndex: 55,
+    flexDirection: 'row', flexWrap: 'wrap', gap: scale(6),
+    paddingVertical: scale(8), backgroundColor: 'rgba(18,18,58,0.68)',
   },
-  signalChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(91,46,255,0.25)', borderWidth: 1, borderColor: 'rgba(91,46,255,0.5)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
-  signalChipText: { color: colors.white, fontSize: 11, fontWeight: '600', flexShrink: 1 },
+  signalChip: { 
+    flexDirection: 'row', alignItems: 'center', gap: scale(6), 
+    backgroundColor: 'rgba(91,46,255,0.25)', borderWidth: 1, 
+    borderColor: 'rgba(91,46,255,0.5)', borderRadius: scale(14), 
+    paddingHorizontal: scale(10), paddingVertical: scale(5), 
+    maxWidth: isSmall ? '80%' : 180 
+  },
+  signalChipText: { color: colors.white, fontSize: scale(11), fontWeight: '600', flexShrink: 1 },
   mainContent: { ...StyleSheet.absoluteFillObject, flexDirection: 'row' },
 
-  // ── ATTENDEE STRIP ──
-  // top/bottom inset so this rail starts below the floating topBar and
-  // stops above the floating bottom toolbar instead of running underneath
-  // either of them (same overlap issue as the toolbar, fixed the same way).
-  attendeeStrip: {
-    position: 'absolute', top: 78, bottom: scale(78), left: 0, zIndex: 40,
-    width: scale(104), backgroundColor: 'rgba(13,13,43,0.55)', paddingVertical: 6,
-  },
-  stripContent: { alignItems: 'center', gap: 10, paddingBottom: 8 },
-  stripCell: { width: scale(88), alignItems: 'center', gap: 3 },
-  stripVideoWrap: {
-    width: scale(88), height: scale(68),
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    position: 'relative',
-    backgroundColor: '#1E1E3F',
-  },
-  stripVideoWrapActive: { borderColor: colors.primary, borderWidth: 2 },
-  speakingRing: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    borderRadius: 10, borderWidth: 2.5, borderColor: colors.green,
-  },
-  stripDotBtn: {
-    position: 'absolute', top: 4, right: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
-    zIndex: 20,
-  },
-  stripDotText: { color: colors.white, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-  stripEditingBadge: {
-    position: 'absolute', top: 4, left: 4,
-    backgroundColor: 'rgba(91,46,255,0.85)',
-    borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
-    zIndex: 20,
-  },
-  stripMutedBadge: {
-    position: 'absolute', bottom: 4, left: 4,
-    backgroundColor: 'rgba(255,59,59,0.85)',
-    borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
-    zIndex: 20,
-  },
-  stripCoHostBadge: {
-    position: 'absolute', bottom: 4, right: 4,
-    backgroundColor: 'rgba(255,193,7,0.9)',
-    borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1,
-    zIndex: 20,
-  },
   galleryCoHostBadge: {
     position: 'absolute', top: 8, left: 8,
     flexDirection: 'row', alignItems: 'center', gap: 3,
@@ -1751,48 +1827,144 @@ function useSessionMainStyles(scale) {
     zIndex: 10,
   },
   galleryCoHostBadgeText: { color: '#3A2900', fontSize: 10, fontWeight: '700' },
-  stripName: { color: 'rgba(255,255,255,0.6)', fontSize: 9, textAlign: 'center', maxWidth: 86 },
 
   // ── VIDEO MODE ──
   speakerView: { flex: 1, backgroundColor: '#111128', position: 'relative' },
-  noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
+  noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: scale(10) },
+  noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: scale(14) },
   pipContainer: {
-    position: 'absolute', bottom: 60, left: scale(112),
-    width: scale(92), height: scale(122),
-    borderRadius: 12, overflow: 'hidden',
+    position: 'absolute', 
+    left: isSmall ? scale(80) : scale(112),
+    width: isSmall ? scale(76) : scale(92), 
+    height: isSmall ? scale(98) : scale(122),
+    borderRadius: scale(12), overflow: 'hidden',
     borderWidth: 2, borderColor: colors.primary,
   },
-  viewToggle: { position: 'absolute', bottom: 14, flexDirection: 'row', backgroundColor: '#1E1E3F', borderRadius: 20, padding: 3, gap: 2, alignSelf: 'center' },
-  viewBtn: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 14 },
+  viewToggle: { 
+    position: 'absolute', 
+    flexDirection: 'row', 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(20), 
+    padding: scale(3), 
+    gap: scale(2), 
+    alignSelf: 'center' 
+  },
+  viewBtn: { paddingHorizontal: scale(14), paddingVertical: scale(5), borderRadius: scale(14) },
   viewBtnActive: { backgroundColor: colors.primary },
-  viewBtnText: { color: colors.white, fontSize: 11, fontWeight: '600' },
+  viewBtnText: { color: colors.white, fontSize: scale(11), fontWeight: '600' },
 
   // ── GALLERY ──
-  galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8, alignContent: 'flex-start' },
-  galleryCell: { width: scale(190), height: scale(140), borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
-  galleryCellDots: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, zIndex: 10 },
-  galleryCellDotsText: { color: colors.white, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
-  galleryCellActive: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 2.5, borderColor: colors.green },
+  galleryGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    padding: scale(8), 
+    gap: scale(8), 
+    alignContent: 'flex-start'
+  },
+  galleryCell: { 
+    width: isSmall ? Math.min(scale(160), width * 0.42) : scale(190), 
+    height: isSmall ? Math.min(scale(120), height * 0.22) : scale(140),
+    borderRadius: scale(12), 
+    overflow: 'hidden', 
+    backgroundColor: '#1E1E3F', 
+    position: 'relative'
+  },
+  galleryCellDots: { 
+    position: 'absolute', 
+    top: scale(8), 
+    right: scale(8), 
+    backgroundColor: 'rgba(0,0,0,0.55)', 
+    borderRadius: scale(10), 
+    paddingHorizontal: scale(7), 
+    paddingVertical: scale(2), 
+    zIndex: 10 
+  },
+  galleryCellDotsText: { color: colors.white, fontSize: scale(15), fontWeight: '700', letterSpacing: 1 },
+  galleryCellActive: { 
+    position: 'absolute', 
+    top: 0, left: 0, right: 0, bottom: 0, 
+    borderRadius: scale(12), 
+    borderWidth: 2.5, 
+    borderColor: colors.green 
+  },
 
   // ── BOARD MODE ──
   // The actual board UI (toolbar, canvas, pages, etc.) now lives inside
   // WhiteboardCanvas / GraphBoardCanvas — this area just hosts it and
   // keeps the floating video PiP on top.
   boardMainArea: { flex: 1, position: 'relative', overflow: 'hidden' },
-  pipStack: { position: 'absolute', top: 78, left: scale(112), zIndex: 60, gap: 6 },
-  stackPip: { width: scale(90), height: scale(116), borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
-  boardEditorsBar: { position: 'absolute', top: 78, right: scale(72), zIndex: 60, gap: 6, maxWidth: 200 },
-  boardEditorChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 16, paddingLeft: 10, paddingRight: 6, paddingVertical: 5 },
-  boardEditorChipText: { color: colors.white, fontSize: 11, fontWeight: '600', maxWidth: 90 },
-  boardEditorRemoveBtn: { backgroundColor: 'rgba(255,59,59,0.8)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
-  boardEditorRemoveText: { color: colors.white, fontSize: 10, fontWeight: '700' },
-  pendingCallBar: { position: 'absolute', top: 78, alignSelf: 'center', zIndex: 61, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
-  pendingCallText: { color: colors.white, fontSize: 12, fontWeight: '600' },
+  pipStack: { 
+    position: 'absolute', 
+    top: 78, 
+    left: isSmall ? scale(80) : scale(112), 
+    zIndex: 60, 
+    gap: scale(6) 
+  },
+  stackPip: { 
+    width: isSmall ? scale(76) : scale(90), 
+    height: isSmall ? scale(96) : scale(116), 
+    borderRadius: scale(12), 
+    overflow: 'hidden', 
+    borderWidth: 2, 
+    borderColor: colors.primary, 
+    backgroundColor: '#1E1E3F'
+  },
+  boardEditorsBar: { 
+    position: 'absolute', 
+    top: 78, 
+    right: isSmall ? scale(40) : scale(72), 
+    zIndex: 60, 
+    gap: scale(6), 
+    maxWidth: isSmall ? '70%' : 200 
+  },
+  boardEditorChip: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(8), 
+    backgroundColor: 'rgba(0,0,0,0.65)', 
+    borderRadius: scale(16), 
+    paddingLeft: scale(10), 
+    paddingRight: scale(6), 
+    paddingVertical: scale(5) 
+  },
+  boardEditorChipText: { 
+    color: colors.white, 
+    fontSize: scale(11), 
+    fontWeight: '600', 
+    maxWidth: isSmall ? 70 : 90 
+  },
+  boardEditorRemoveBtn: { 
+    backgroundColor: 'rgba(255,59,59,0.8)', 
+    borderRadius: scale(10), 
+    paddingHorizontal: scale(8), 
+    paddingVertical: scale(3) 
+  },
+  boardEditorRemoveText: { color: colors.white, fontSize: scale(10), fontWeight: '700' },
+  pendingCallBar: { 
+    position: 'absolute', 
+    top: 78, 
+    alignSelf: 'center', 
+    zIndex: 61, 
+    backgroundColor: 'rgba(0,0,0,0.7)', 
+    paddingHorizontal: scale(14), 
+    paddingVertical: scale(8), 
+    borderRadius: scale(18) 
+  },
+  pendingCallText: { color: colors.white, fontSize: scale(12), fontWeight: '600' },
   interruptBar: { position: 'absolute', bottom: 14, alignSelf: 'center', zIndex: 60 },
-  interruptBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 20, paddingVertical: 11, borderRadius: 24, borderWidth: 1.5, borderColor: colors.primary },
+  interruptBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(6), 
+    backgroundColor: 'rgba(0,0,0,0.72)', 
+    paddingHorizontal: scale(20), 
+    paddingVertical: scale(11), 
+    borderRadius: scale(24), 
+    borderWidth: 1.5, 
+    borderColor: colors.primary 
+  },
   interruptBtnActive: { backgroundColor: colors.primary },
-  interruptBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
+  interruptBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(13) },
 
   // ── TOOLBAR ──
   // Always a full-width bar docked to the bottom — no more vertical-rail
@@ -1800,78 +1972,271 @@ function useSessionMainStyles(scale) {
   // (via space-between), not which edge the bar lives on.
   toolbarScroll: {
     position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 40,
-    paddingVertical: 8, backgroundColor: 'rgba(13,13,43,0.55)',
+    paddingVertical: scale(8), backgroundColor: 'rgba(13,13,43,0.55)',
+    paddingBottom: insets.bottom > 0 ? insets.bottom + 8 : 8,
   },
   toolbar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: TOOLBAR_H_PADDING / 2,
   },
   // width/height are set inline per-button from the computed toolBtnSize.
-  toolBtn: { borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  toolBtn: { 
+    borderRadius: scale(10), 
+    backgroundColor: '#1E1E3F', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: scale(2) 
+  },
   toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.15)' },
-  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginTop: 4 },
+  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginTop: scale(4) },
   toolLabel: { fontSize: scale(7), color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
   toolBadge: {
     position: 'absolute',
-    top: 2,
-    right: 6,
+    top: scale(2),
+    right: scale(6),
     backgroundColor: colors.red,
-    borderRadius: 9,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 3,
+    borderRadius: scale(9),
+    minWidth: scale(16),
+    height: scale(16),
+    paddingHorizontal: scale(3),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolBadgeText: { color: colors.white, fontSize: 9, fontWeight: '700' },
+  toolBadgeText: { color: colors.white, fontSize: scale(9), fontWeight: '700' },
 
   // ── MODALS ──
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  boardPickerPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: scale(300), maxWidth: '92%', gap: 12, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
-  boardPickerTitle: { fontSize: 17, fontWeight: '800', color: colors.white, marginBottom: 4 },
-  boardPickerOption: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  boardPickerName: { fontSize: 15, fontWeight: '700', color: colors.white },
-  boardPickerDesc: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
-  reactionsPanel: { backgroundColor: '#1E1E3F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 14, position: 'absolute', bottom: 0, left: 0, right: 0 },
-  reactionsPanelTitle: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  reactionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
-  reactionBtn: { width: scale(60), height: scale(60), borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
-  reactionEmoji: { fontSize: 30 },
-  coHostPanel: { backgroundColor: '#1E1E3F', borderRadius: 20, padding: 20, width: scale(320), maxWidth: '92%', maxHeight: '75%', gap: 12, borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
-  coHostPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  coHostPanelTitle: { fontSize: 17, fontWeight: '800', color: colors.white },
-  coHostPanelDesc: { fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 17 },
-  coHostEmptyText: { fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 20 },
-  coHostList: { maxHeight: 280 },
-  coHostRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  coHostRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 },
-  coHostAvatar: { width: scale(30), height: scale(30), borderRadius: scale(15), backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  coHostAvatarText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-  coHostRowName: { color: colors.white, fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  coHostToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)' },
+  boardPickerPanel: { 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(20), 
+    padding: scale(20), 
+    width: isSmall ? Math.min(scale(280), width * 0.92) : scale(300), 
+    maxWidth: '92%', 
+    gap: scale(12), 
+    borderWidth: 1, 
+    borderColor: 'rgba(91,46,255,0.4)' 
+  },
+  boardPickerTitle: { fontSize: scale(17), fontWeight: '800', color: colors.white, marginBottom: scale(4) },
+  boardPickerOption: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(12), 
+    backgroundColor: 'rgba(255,255,255,0.05)', 
+    borderRadius: scale(14), 
+    padding: scale(14), 
+    borderWidth: 1, 
+    borderColor: 'rgba(255,255,255,0.08)' 
+  },
+  boardPickerName: { fontSize: scale(15), fontWeight: '700', color: colors.white },
+  boardPickerDesc: { fontSize: scale(12), color: 'rgba(255,255,255,0.5)', marginTop: scale(2) },
+  reactionsPanel: { 
+    backgroundColor: '#1E1E3F', 
+    borderTopLeftRadius: scale(24), 
+    borderTopRightRadius: scale(24), 
+    padding: scale(24), 
+    gap: scale(14), 
+    position: 'absolute', 
+    bottom: 0, 
+    left: 0, 
+    right: 0 
+  },
+  reactionsPanelTitle: { 
+    color: 'rgba(255,255,255,0.6)', 
+    fontSize: scale(11), 
+    fontWeight: '700', 
+    letterSpacing: 1 
+  },
+  reactionsGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: scale(12), 
+    justifyContent: 'center' 
+  },
+  reactionBtn: { 
+    width: isSmall ? Math.min(scale(52), width * 0.12) : scale(60), 
+    height: isSmall ? Math.min(scale(52), width * 0.12) : scale(60), 
+    borderRadius: scale(16), 
+    backgroundColor: '#2E2E5F', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  reactionEmoji: { fontSize: isSmall ? 24 : 30 },
+  coHostPanel: { 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(20), 
+    padding: scale(20), 
+    width: isSmall ? Math.min(scale(300), width * 0.92) : scale(320), 
+    maxWidth: '92%', 
+    maxHeight: isSmall ? '80%' : '75%', 
+    gap: scale(12), 
+    borderWidth: 1, 
+    borderColor: 'rgba(255,193,7,0.4)' 
+  },
+  coHostPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: scale(7) },
+  coHostPanelTitle: { fontSize: scale(17), fontWeight: '800', color: colors.white },
+  coHostPanelDesc: { 
+    fontSize: scale(12), 
+    color: 'rgba(255,255,255,0.55)', 
+    lineHeight: scale(17) 
+  },
+  coHostEmptyText: { 
+    fontSize: scale(13), 
+    color: 'rgba(255,255,255,0.4)', 
+    textAlign: 'center', 
+    paddingVertical: scale(20) 
+  },
+  coHostList: { maxHeight: isSmall ? height * 0.5 : 280 },
+  coHostRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingVertical: scale(9), 
+    borderBottomWidth: 1, 
+    borderBottomColor: 'rgba(255,255,255,0.06)' 
+  },
+  coHostRowLeft: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(10), 
+    flex: 1, 
+    marginRight: scale(8) 
+  },
+  coHostAvatar: { 
+    width: scale(30), 
+    height: scale(30), 
+    borderRadius: scale(15), 
+    backgroundColor: colors.primary, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  coHostAvatarText: { color: colors.white, fontSize: scale(11), fontWeight: '700' },
+  coHostRowName: { color: colors.white, fontSize: scale(13), fontWeight: '600', flexShrink: 1 },
+  coHostToggle: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(4), 
+    paddingHorizontal: scale(12), 
+    paddingVertical: scale(7), 
+    borderRadius: scale(10), 
+    borderWidth: 1, 
+    borderColor: 'rgba(255,255,255,0.15)', 
+    backgroundColor: 'rgba(255,255,255,0.05)' 
+  },
   coHostToggleActive: { backgroundColor: 'rgba(255,193,7,0.9)', borderColor: 'rgba(255,193,7,0.9)' },
-  coHostToggleText: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
+  coHostToggleText: { 
+    color: 'rgba(255,255,255,0.7)', 
+    fontSize: scale(11), 
+    fontWeight: '700' 
+  },
   coHostToggleTextActive: { color: '#3A2900' },
-  coHostCloseBtn: { backgroundColor: 'rgba(255,255,255,0.08)', paddingVertical: 11, borderRadius: 12, alignItems: 'center', marginTop: 4 },
-  coHostCloseBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
-  dropdownModal: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: scale(250), maxWidth: '92%', borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)' },
-  dropdownHeader: { color: colors.primaryLight, fontWeight: '700', fontSize: 14, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  dropdownText: { fontSize: 14 },
-  dropdownClose: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10 },
-  dropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
-  approvalCard: { position: 'absolute', top: 90, right: 72, backgroundColor: '#1E1E3F', borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, maxWidth: 340, borderWidth: 1, borderColor: 'rgba(91,46,255,0.4)', elevation: 20 },
-  approvalLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  approvalAvatar: { width: scale(34), height: scale(34), borderRadius: scale(17), backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  approvalAvatarText: { color: colors.white, fontWeight: '700', fontSize: 11 },
-  approvalTitle: { color: colors.white, fontSize: 13, fontWeight: '600' },
-  approvalTimer: { height: 3, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, width: 100, marginTop: 5 },
-  approvalTimerFill: { width: '70%', height: 3, backgroundColor: colors.primary, borderRadius: 2 },
-  approvalButtons: { flexDirection: 'column', gap: 6 },
-  approveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.green, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8 },
-  approveBtnText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  declineBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.red, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8 },
-  declineBtnText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  }), [scale]);
+  coHostCloseBtn: { 
+    backgroundColor: 'rgba(255,255,255,0.08)', 
+    paddingVertical: scale(11), 
+    borderRadius: scale(12), 
+    alignItems: 'center', 
+    marginTop: scale(4) 
+  },
+  coHostCloseBtnText: { 
+    color: colors.white, 
+    fontWeight: '700', 
+    fontSize: scale(13) 
+  },
+  dropdownModal: { 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(14), 
+    padding: scale(16), 
+    width: isSmall ? Math.min(scale(230), width * 0.88) : scale(250), 
+    maxWidth: '92%', 
+    borderWidth: 1, 
+    borderColor: 'rgba(91,46,255,0.4)' 
+  },
+  dropdownHeader: { 
+    color: colors.primaryLight, 
+    fontWeight: '700', 
+    fontSize: scale(14), 
+    paddingHorizontal: scale(10), 
+    paddingVertical: scale(10), 
+    borderBottomWidth: 1, 
+    borderBottomColor: 'rgba(255,255,255,0.08)' 
+  },
+  dropdownItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(10), 
+    paddingVertical: scale(11), 
+    paddingHorizontal: scale(10), 
+    borderBottomWidth: 1, 
+    borderBottomColor: 'rgba(255,255,255,0.06)' 
+  },
+  dropdownText: { fontSize: scale(14) },
+  dropdownClose: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: scale(4), 
+    paddingVertical: scale(10) 
+  },
+  dropdownCloseText: { 
+    color: 'rgba(255,255,255,0.4)', 
+    fontSize: scale(12) 
+  },
+  approvalCard: { 
+    position: 'absolute', 
+    top: 90, 
+    right: isSmall ? scale(40) : scale(72), 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(16), 
+    padding: scale(14), 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: scale(12), 
+    maxWidth: isSmall ? '80%' : 340, 
+    borderWidth: 1, 
+    borderColor: 'rgba(91,46,255,0.4)', 
+    elevation: 20 
+  },
+  approvalLeft: { flexDirection: 'row', alignItems: 'center', gap: scale(10), flex: 1 },
+  approvalAvatar: { 
+    width: scale(34), 
+    height: scale(34), 
+    borderRadius: scale(17), 
+    backgroundColor: colors.primary, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  approvalAvatarText: { color: colors.white, fontWeight: '700', fontSize: scale(11) },
+  approvalTitle: { color: colors.white, fontSize: scale(13), fontWeight: '600' },
+  approvalTimer: { 
+    height: scale(3), 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    borderRadius: scale(2), 
+    width: scale(100), 
+    marginTop: scale(5) 
+  },
+  approvalTimerFill: { width: '70%', height: scale(3), backgroundColor: colors.primary, borderRadius: scale(2) },
+  approvalButtons: { flexDirection: 'column', gap: scale(6) },
+  approveBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: scale(5), 
+    backgroundColor: colors.green, 
+    paddingVertical: scale(7), 
+    paddingHorizontal: scale(12), 
+    borderRadius: scale(8) 
+  },
+  approveBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(12) },
+  declineBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: scale(5), 
+    backgroundColor: colors.red, 
+    paddingVertical: scale(7), 
+    paddingHorizontal: scale(12), 
+    borderRadius: scale(8) 
+  },
+  declineBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(12) },
+  }), [scale, isSmall, width, height]);
 }

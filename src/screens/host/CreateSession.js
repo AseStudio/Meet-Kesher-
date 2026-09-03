@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   TextInput, ScrollView, Switch, ActivityIndicator, Platform
@@ -7,6 +7,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
@@ -62,12 +63,48 @@ export default function CreateSession({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(true);
-  const [allowGuests, setAllowGuests] = useState(true);
+  const [allowGuests, setAllowGuests] = useState(false);
   const [lobbyMusic, setLobbyMusic] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sessionCode] = useState(generateCode());
+  const [plan, setPlan] = useState('free');
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
+      setPlan(data?.plan || 'free');
+    })();
+  }, []);
+
+  // Guests have no account, so there's no way to cap or bill any one of
+  // them individually — the only lever available is gating the feature
+  // behind a paid plan at all, and passing the real cost through to the
+  // host's own minute balance (half of accumulated guest presence-time,
+  // deducted when the session ends — see apply_guest_minute_penalty on
+  // the backend). Free hosts can't turn this on; paid hosts get an
+  // explicit heads-up every time they do, not just once.
+  const handleToggleAllowGuests = (next) => {
+    if (next && plan === 'free') {
+      showAlert('Kesher Premium', 'Allowing guest attendees is a paid-plan feature. Upgrade to enable it for your sessions.');
+      return;
+    }
+    if (next) {
+      showAlert(
+        'Allow Guest Users',
+        'Guests don\u2019t have accounts, so their time in the session can\u2019t be tracked or billed individually. Instead, half of the total time guests spend in this session will be deducted from your own monthly hosting minutes.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Turn On', onPress: () => setAllowGuests(true) },
+        ]
+      );
+      return;
+    }
+    setAllowGuests(false);
+  };
   // Purely local UI feedback for the copy buttons below — 'link' | 'code'
   // | null. Was previously missing entirely (the buttons had no onPress
   // at all), so nothing was actually being copied. This doesn't touch
@@ -120,7 +157,7 @@ export default function CreateSession({ navigation }) {
   const advancedSettings = [
     { icon: 'videocam-outline', label: 'Default Camera On', value: cameraOn, onChange: setCameraOn },
     { icon: 'mic-outline', label: 'Default Mic On', value: micOn, onChange: setMicOn },
-    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: setAllowGuests },
+    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: handleToggleAllowGuests },
     { icon: 'musical-notes-outline', label: 'Lobby Music', value: lobbyMusic, onChange: setLobbyMusic },
   ];
 

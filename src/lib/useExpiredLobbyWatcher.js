@@ -117,7 +117,7 @@ export function useExpiredLobbyWatcher(sessions) {
     try {
       const { error } = await supabase
         .from('sessions')
-        .update({ status: 'live', last_seen_at: new Date().toISOString() })
+        .update({ status: 'live', started_at: new Date().toISOString(), last_seen_at: new Date().toISOString() })
         .eq('id', expiredSession.id);
       if (error) throw error;
       setVisible(false);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Modal, Alert, Platform
+  ScrollView, Modal, Alert, Platform, SafeAreaView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -15,6 +15,7 @@ import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SPEAKER_SWITCH_DELAY = 600;
 const VOLUME_THRESHOLD = 10;
@@ -34,11 +35,10 @@ export default function AttendeeSession({ navigation, route }) {
   // 'AttendeeDashboard', which doesn't exist for them.
   const guest = route.params?.guest || null;
   const isGuest = !!guest;
-  const { scale, isTablet, isDesktop, width, height } = useResponsive();
-  // Still used for the attendee strip (left rail vs. top bar) — only the
-  // toolbar itself no longer varies by orientation.
+  const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
+  const insets = useSafeAreaInsets();
   const isPortraitPhone = !isTablet && height > width;
-  const styles = useAttendeeSessionStyles(scale);
+  const styles = useAttendeeSessionStyles(scale, isSmall, width, height);
 
   // If the attendee closes the browser tab instead of tapping Leave, this
   // registers the leave immediately instead of leaving a stale row that
@@ -49,15 +49,19 @@ export default function AttendeeSession({ navigation, route }) {
     getUserId: () => currentUserRef.current?.id || null,
   });
 
+  // Improved toolbar calculation with safe area support
+  const safeHorizontalPadding = TOOLBAR_H_PADDING + insets.left + insets.right;
+  const availableWidth = width - safeHorizontalPadding;
+  const baseToolSize = Math.max(TOOLBAR_MIN_BTN, (availableWidth / TOOL_COUNT) * 0.74);
   const toolBtnSize = Math.round(
-    Math.min(TOOLBAR_MAX_BTN, Math.max(TOOLBAR_MIN_BTN, ((width - TOOLBAR_H_PADDING) / TOOL_COUNT) * 0.74))
+    Math.min(TOOLBAR_MAX_BTN, isSmall ? Math.max(TOOLBAR_MIN_BTN, baseToolSize * 0.85) : baseToolSize)
   );
-  const toolShowLabel = toolBtnSize >= 44;
-  const toolIconSize = Math.max(14, Math.round(toolBtnSize * 0.36));
-  const toolbarBarHeight = toolBtnSize + 16;
+  const toolShowLabel = toolBtnSize >= (isSmall ? 36 : 44);
+  const toolIconSize = Math.max(14, Math.round(toolBtnSize * (isSmall ? 0.4 : 0.36)));
+  const toolbarBarHeight = toolBtnSize + 16 + insets.bottom;
 
-  // Attendee strip visibility — visible on load, then auto-hides after a
-  // few seconds of no interaction, same as the host screen.
+  // In-session chrome visibility — visible on load, then auto-hides after
+  // a few seconds of no interaction, same as the host screen.
   const [controlsVisible, setControlsVisible] = useState(true);
   const controlsHideTimerRef = useRef(null);
   const revealControls = () => {
@@ -558,11 +562,27 @@ export default function AttendeeSession({ navigation, route }) {
 
     // Broadcast identity so host can map our Agora UID to our profile
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { data: profile } = await supabase
-        .from('profiles').select('full_name').eq('id', me.id).single();
+      // Guests were never handled here before — supabase.auth.getUser()
+      // returns no user for them (no real Supabase session at all), so
+      // `.eq('id', me.id)` would throw the instant it ran, silently
+      // swallowed by the catch below. That meant the host never
+      // received an identity broadcast for a guest at all — no name,
+      // no isGuest flag, nothing. Handling both branches explicitly here
+      // is what finally lets the host's side know a participant is a
+      // guest, which the minute-penalty tracking below depends on.
+      let identityId = null;
+      let identityName = 'Attendee';
+      if (!isGuest) {
+        const { data: { user: me } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase
+          .from('profiles').select('full_name').eq('id', me.id).single();
+        identityId = me.id;
+        identityName = profile?.full_name || 'Attendee';
+      } else {
+        identityName = guest?.name || 'Guest';
+      }
 
-      currentUserRef.current = { id: me.id, name: profile?.full_name || 'Attendee' };
+      currentUserRef.current = { id: identityId, name: identityName };
 
       // Small delay to ensure control channel is subscribed
       setTimeout(() => {
@@ -571,9 +591,10 @@ export default function AttendeeSession({ navigation, route }) {
           event: 'user-identity',
           payload: {
             agoraUid: myUidRef.current,
-            userId: me.id,
-            name: profile?.full_name || 'Attendee',
+            userId: identityId,
+            name: identityName,
             isHost: false,
+            isGuest,
           },
         });
         console.log('📡 Identity broadcast sent');
@@ -770,24 +791,6 @@ export default function AttendeeSession({ navigation, route }) {
   // interrupting. This is what actually gets passed to the board.
   const effectiveBoardCanEdit = canEdit && !hostInterrupting;
 
-  // ─── DUPLICATED UIDS (attendee-strip double-attach guard) ───
-  // This screen has its own attendeeStrip rendering every remote user's
-  // VideoTile unconditionally — the same pattern that causes blank/white
-  // video on the host's screen when a track is handed to two mounted
-  // <VideoTile>s at once (Agora's track.play() doesn't clone a stream per
-  // call). This file didn't get that guard the first time it was fixed —
-  // it was only applied to SessionMain.js. Same three "elsewhere" cases,
-  // from this attendee's point of view:
-  // - Board mode: the pipStack always shows remoteUsers[0] (the host).
-  // - Speaker view: mainRemoteUser is the big central tile, whenever
-  // this attendee isn't the one currently speaking.
-  // - Gallery view: EVERY remote user (host included) is shown at once.
-  const duplicatedRemoteUids = boardMode
-    ? new Set(remoteUsers.length > 0 ? [remoteUsers[0].uid] : [])
-    : view === 'gallery'
-      ? new Set(remoteUsers.map(u => u.uid))
-      : new Set(!localOnMain && mainRemoteUser ? [mainRemoteUser.uid] : []);
-
   const openChat = () => {
     setUnreadCount(0);
     chatOpenRef.current = true;
@@ -810,22 +813,38 @@ export default function AttendeeSession({ navigation, route }) {
     navigation.navigate('PollScreen', { session, currentUser: currentUserRef.current, isHost: false });
   };
 
+  // Calculate adaptive dimensions for different screen sizes
+  const callToBoardLeftRight = isSmall ? Math.max(scale(8), insets.left + 4) : 10;
+  const atBoardBannerLeftRight = isSmall ? Math.max(scale(8), insets.left + 4) : 10;
+  const galleryCellWidth = isSmall ? Math.min(scale(150), width * 0.4) : scale(170);
+  const galleryCellHeight = isSmall ? Math.min(scale(110), height * 0.2) : scale(130);
+  const pipContainerWidth = isSmall ? Math.min(scale(76), width * 0.18) : scale(88);
+  const pipContainerHeight = isSmall ? Math.min(scale(98), height * 0.18) : scale(116);
+  const stackPipWidth = isSmall ? Math.min(scale(76), width * 0.18) : scale(88);
+  const stackPipHeight = isSmall ? Math.min(scale(94), height * 0.16) : scale(114);
+  const reactionBtnSize = isSmall ? Math.min(scale(52), width * 0.12) : scale(60);
+  const modDropdownWidth = isSmall ? Math.min(scale(230), width * 0.88) : scale(250);
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
       <NotificationToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Top Bar */}
       {controlsVisible && (
-      <View style={styles.topBar} {...revealOnHoverProps}>
+      <View style={[styles.topBar, { 
+        paddingTop: Math.max(insets.top + 8, 20),
+        paddingLeft: Math.max(insets.left + 8, 12),
+        paddingRight: Math.max(insets.right + 8, 12)
+      }]} {...revealOnHoverProps}>
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
-            <ModeIcon mode={session?.mode} size={11} color={colors.white} />
+            <ModeIcon mode={session?.mode} size={scale(11)} color={colors.white} />
             <Text style={styles.modeBadgeText}>{session?.mode || 'Session'}</Text>
           </View>
           {isCoHost && (
             <View style={styles.coHostChip}>
-              <Ionicons name="star" size={10} color="#FFC107" />
+              <Ionicons name="star" size={scale(10)} color="#FFC107" />
               <Text style={styles.coHostChipText}>Co-Host</Text>
             </View>
           )}
@@ -847,9 +866,12 @@ export default function AttendeeSession({ navigation, route }) {
 
       {/* Call to Board */}
       {showCallToBoard && !calledToBoard && (
-        <View style={styles.callToBoardCard}>
+        <View style={[styles.callToBoardCard, { 
+          left: callToBoardLeftRight, 
+          right: callToBoardLeftRight
+        }]}>
           <View style={styles.callToBoardIconWrap}>
-            <Ionicons name="create-outline" size={22} color={colors.primary} />
+            <Ionicons name="create-outline" size={scale(22)} color={colors.primary} />
           </View>
           <View style={styles.callToBoardInfo}>
             <Text style={styles.callToBoardTitle}>Host has called you to the {boardLabel}!</Text>
@@ -867,9 +889,12 @@ export default function AttendeeSession({ navigation, route }) {
       )}
 
       {calledToBoard && (
-        <View style={styles.atBoardBanner}>
+        <View style={[styles.atBoardBanner, { 
+          left: atBoardBannerLeftRight,
+          right: atBoardBannerLeftRight
+        }]}>
           <View style={styles.atBoardTextRow}>
-            <Ionicons name="create-outline" size={15} color={colors.white} />
+            <Ionicons name="create-outline" size={scale(15)} color={colors.white} />
             <Text style={styles.atBoardText}>You are at the board</Text>
           </View>
           <TouchableOpacity style={styles.finishBtn} onPress={finishAtBoard}>
@@ -879,79 +904,6 @@ export default function AttendeeSession({ navigation, route }) {
       )}
 
       <View style={[styles.mainContent, isPortraitPhone && styles.mainContentPortrait]}>
-
-        {/* ─── STRIP — host and other remote users. Hidden by default;
-            tapping the video area reveals it for a few seconds, and
-            touching the strip itself resets that timer. Also hidden
-            outright in gallery view (every remote user already has their
-            own tile there) and in board mode (users are already shown in
-            the floating pipStack there, and the strip would otherwise
-            cover the board itself). ─── */}
-        {controlsVisible && !boardMode && view !== 'gallery' && (
-        <View style={[styles.attendeeStrip, isPortraitPhone && styles.attendeeStripHorizontal]} onTouchStart={revealControls} {...revealOnHoverProps}>
-          <ScrollView
-            horizontal={isPortraitPhone}
-            showsVerticalScrollIndicator={false}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={isPortraitPhone ? styles.stripContentHorizontal : styles.stripContent}
-          >
-            {remoteUsers.map((user, i) => {
-              // This user's track is already playing in the board PiP
-              // stack, as the big speaker-view tile, or in the Gallery
-              // grid — don't hand it to a second VideoTile here too. See
-              // duplicatedRemoteUids comment above.
-              const isDuplicated = duplicatedRemoteUids.has(user.uid);
-              const isHostTile = i === 0;
-              // This peer's real camera state, reported over 'media-state'
-              // broadcasts — see remoteMediaState comment above.
-              const isCameraOff = !!remoteMediaState[user.uid]?.cameraOff;
-              return (
-                <View key={user.uid} style={styles.stripCell}>
-                  <View style={[
-                    styles.stripVideoWrap,
-                    activeSpeakerUid === user.uid && styles.stripVideoWrapActive,
-                  ]}>
-                    <VideoTile
-                      track={isDuplicated ? null : user.videoTrack}
-                      cameraOff={isDuplicated || isCameraOff}
-                      initials={isHostTile ? 'H' : `U${i}`}
-                      style={StyleSheet.absoluteFillObject}
-                      initialsSize={15}
-                    />
-                    {/* Co-host badge — visible to everyone, not just other co-hosts */}
-                    {coHostUids[user.uid] && (
-                      <View style={styles.stripCoHostBadge}>
-                        <Ionicons name="star" size={9} color="#3A2900" />
-                      </View>
-                    )}
-                    {/* Badge when this peer is currently muted */}
-                    {remoteMediaState[user.uid]?.muted && (
-                      <View style={styles.stripMutedBadge}>
-                        <Ionicons name="mic-off-outline" size={9} color={colors.white} />
-                      </View>
-                    )}
-                    {/* Moderation menu — only for co-hosts, and never on the host's own tile */}
-                    {isCoHost && !isHostTile && (
-                      <TouchableOpacity
-                        style={styles.stripDotBtn}
-                        onPress={() => setShowModDropdown(user.uid)}
-                      >
-                        <Ionicons name="ellipsis-vertical" size={12} color={colors.white} />
-                      </TouchableOpacity>
-                    )}
-                    {activeSpeakerUid === user.uid && (
-                      <View style={[styles.speakingRing, { pointerEvents: 'none' }]} />
-                    )}
-                  </View>
-                  <Text style={styles.stripName} numberOfLines={1}>
-                    {isHostTile ? 'Host' : `User ${i}`}
-                  </Text>
-                </View>
-              );
-            })}
-          </ScrollView>
-        </View>
-        )}
 
         {/* ─── MAIN VIEW ─── */}
         <View style={styles.speakerView} onTouchStart={revealControls} {...revealOnHoverProps}>
@@ -991,19 +943,19 @@ export default function AttendeeSession({ navigation, route }) {
                       initials="Host"
                       label="Host"
                       style={{ flex: 1 }}
-                      initialsSize={13}
+                      initialsSize={scale(13)}
                     />
                   </View>
                 )}
                 <View style={styles.stackPip}>
-                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={13} mirror={true} />
+                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
                 </View>
               </View>
 
               <View style={styles.boardWatchBadge}>
                 <Ionicons
                   name={effectiveBoardCanEdit ? 'create-outline' : (calledToBoard && hostInterrupting ? 'pause-outline' : 'eye-outline')}
-                  size={12}
+                  size={scale(12)}
                   color={colors.white}
                 />
                 <Text style={styles.boardWatchText}>
@@ -1019,10 +971,13 @@ export default function AttendeeSession({ navigation, route }) {
           ) : view === 'gallery' ? (
             <ScrollView
               style={{ flex: 1 }}
-              contentContainerStyle={[styles.galleryGrid, { paddingTop: 78, paddingBottom: toolbarBarHeight + 16 }]}
+              contentContainerStyle={[styles.galleryGrid, { 
+                paddingTop: 78 + (insets.top > 0 ? insets.top - 10 : 0),
+                paddingBottom: toolbarBarHeight + scale(16) 
+              }]}
             >
               <View style={styles.galleryCell}>
-                <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label={iAmSpeaking ? 'You' : 'You'} style={{ flex: 1 }} initialsSize={20} mirror={true} />
+                <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label={iAmSpeaking ? 'You' : 'You'} style={{ flex: 1 }} initialsSize={scale(20)} mirror={true} />
                 {iAmSpeaking && <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />}
               </View>
               {remoteUsers.map((user, i) => (
@@ -1033,17 +988,17 @@ export default function AttendeeSession({ navigation, route }) {
                     initials={i === 0 ? 'H' : `U${i}`}
                     label={i === 0 ? 'Host' : `User ${i}`}
                     style={{ flex: 1 }}
-                    initialsSize={20}
+                    initialsSize={scale(20)}
                   />
                   {coHostUids[user.uid] && (
                     <View style={styles.galleryCoHostBadge}>
-                      <Ionicons name="star" size={10} color="#3A2900" />
+                      <Ionicons name="star" size={scale(10)} color="#3A2900" />
                       <Text style={styles.galleryCoHostBadgeText}>Co-host</Text>
                     </View>
                   )}
                   {isCoHost && i !== 0 && (
                     <TouchableOpacity style={styles.galleryCellDots} onPress={() => setShowModDropdown(user.uid)}>
-                      <Ionicons name="ellipsis-vertical" size={14} color={colors.white} />
+                      <Ionicons name="ellipsis-vertical" size={scale(14)} color={colors.white} />
                     </TouchableOpacity>
                   )}
                   {activeSpeakerUid === user.uid && <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />}
@@ -1062,7 +1017,7 @@ export default function AttendeeSession({ navigation, route }) {
                   initials="You"
                   label="You (Speaking)"
                   style={{ flex: 1 }}
-                  initialsSize={40}
+                  initialsSize={scale(40)}
                   mirror={true}
                 />
               ) : mainRemoteUser ? (
@@ -1073,19 +1028,24 @@ export default function AttendeeSession({ navigation, route }) {
                   initials={remoteUsers.indexOf(mainRemoteUser) === 0 ? 'Host' : `U${remoteUsers.indexOf(mainRemoteUser)}`}
                   label={remoteUsers.indexOf(mainRemoteUser) === 0 ? 'Host' : `User ${remoteUsers.indexOf(mainRemoteUser)}`}
                   style={{ flex: 1 }}
-                  initialsSize={40}
+                  initialsSize={scale(40)}
                 />
               ) : (
                 <View style={styles.noVideoPlaceholder}>
-                  <Ionicons name="hourglass-outline" size={34} color="rgba(255,255,255,0.4)" />
+                  <Ionicons name="hourglass-outline" size={scale(34)} color="rgba(255,255,255,0.4)" />
                   <Text style={styles.noVideoText}>{joined ? 'Waiting for host video...' : 'Connecting...'}</Text>
                 </View>
               )}
 
               {/* PiP — show attendee's self-view when NOT on main */}
               {showPiP && (
-                <View style={[styles.pipContainer, { bottom: toolbarBarHeight + 10 }]}>
-                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={13} mirror={true} />
+                <View style={[styles.pipContainer, { 
+                  bottom: toolbarBarHeight + scale(10),
+                  width: pipContainerWidth,
+                  height: pipContainerHeight,
+                  right: isSmall ? scale(50) : scale(74)
+                }]}>
+                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
                 </View>
               )}
             </>
@@ -1093,18 +1053,20 @@ export default function AttendeeSession({ navigation, route }) {
 
           {/* Signal Badge */}
           {activeSignal && !boardMode && (
-            <View style={styles.signalBadge}>
-              <Ionicons name={SIGNAL_ICON[activeSignal] || 'hand-left-outline'} size={14} color={colors.white} />
+            <View style={[styles.signalBadge, { 
+              top: scale(78) + (insets.top > 0 ? insets.top - scale(10) : 0)
+            }]}>
+              <Ionicons name={SIGNAL_ICON[activeSignal] || 'hand-left-outline'} size={scale(14)} color={colors.white} />
               <Text style={styles.signalBadgeText}>Signal sent</Text>
               <TouchableOpacity onPress={() => sendSignal(activeSignal)}>
-                <Ionicons name="close" size={16} color="rgba(255,255,255,0.7)" />
+                <Ionicons name="close" size={scale(16)} color="rgba(255,255,255,0.7)" />
               </TouchableOpacity>
             </View>
           )}
 
           {/* View Toggle */}
           {!boardMode && controlsVisible && (
-            <View style={[styles.viewToggle, { bottom: toolbarBarHeight + 10 }]}>
+            <View style={[styles.viewToggle, { bottom: toolbarBarHeight + scale(10) }]}>
               <TouchableOpacity style={[styles.viewBtn, view === 'speaker' && styles.viewBtnActive]} onPress={() => setView('speaker')}>
                 <Text style={styles.viewBtnText}>Speaker</Text>
               </TouchableOpacity>
@@ -1180,7 +1142,7 @@ export default function AttendeeSession({ navigation, route }) {
             <View style={styles.signalsRow}>
               {signals.map(s => (
                 <TouchableOpacity key={s.key} style={[styles.signalBtn, activeSignal === s.key && styles.signalBtnActive]} onPress={() => { sendSignal(s.key); setShowReactions(false); }}>
-                  <Ionicons name={s.icon} size={22} color={colors.white} />
+                  <Ionicons name={s.icon} size={scale(22)} color={colors.white} />
                   <Text style={styles.signalBtnLabel}>{s.label}</Text>
                 </TouchableOpacity>
               ))}
@@ -1188,7 +1150,10 @@ export default function AttendeeSession({ navigation, route }) {
             <Text style={styles.reactionsPanelTitle}>REACTIONS</Text>
             <View style={styles.reactionsGrid}>
               {reactions.map((emoji, i) => (
-                <TouchableOpacity key={i} style={styles.reactionBtn} onPress={() => sendReaction(emoji)}>
+                <TouchableOpacity key={i} style={[styles.reactionBtn, { 
+                  width: reactionBtnSize, 
+                  height: reactionBtnSize 
+                }]} onPress={() => sendReaction(emoji)}>
                   <Text style={styles.reactionEmoji}>{emoji}</Text>
                 </TouchableOpacity>
               ))}
@@ -1213,7 +1178,7 @@ export default function AttendeeSession({ navigation, route }) {
               { icon: 'exit-outline', label: 'Remove from Session', danger: true, action: () => sendCohostRequest('remove', showModDropdown) },
             ].map((item, i) => (
               <TouchableOpacity key={i} style={styles.modDropdownItem} onPress={item.action}>
-                <Ionicons name={item.icon} size={16} color={item.danger ? colors.red : colors.white} />
+                <Ionicons name={item.icon} size={scale(16)} color={item.danger ? colors.red : colors.white} />
                 <Text style={[styles.modDropdownText, item.danger && styles.modDropdownTextDanger]}>{item.label}</Text>
               </TouchableOpacity>
             ))}
@@ -1223,174 +1188,145 @@ export default function AttendeeSession({ navigation, route }) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
-function useAttendeeSessionStyles(scale) {
+function useAttendeeSessionStyles(scale, isSmall, width, height) {
   return useMemo(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A', position: 'relative' },
   topBar: {
     position: 'absolute', top: 0, left: 0, right: 0, zIndex: 60,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 12, paddingTop: 20, backgroundColor: 'rgba(13,13,43,0.68)',
+    padding: scale(12), paddingTop: scale(20), backgroundColor: 'rgba(13,13,43,0.68)',
   },
-  sessionTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
-  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 3 },
-  modeBadgeText: { color: colors.white, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
-  coHostChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,193,7,0.18)', borderWidth: 1, borderColor: 'rgba(255,193,7,0.6)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 5 },
-  coHostChipText: { color: '#FFC107', fontSize: 10, fontWeight: '700' },
-  topRight: { alignItems: 'flex-end', gap: 4 },
-  recordingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,59,59,0.2)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
-  recordingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.red },
-  recordingText: { color: colors.red, fontSize: 10, fontWeight: '700' },
-  liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
-  liveText: { color: colors.green, fontSize: 10, fontWeight: '700' },
-  callToBoardCard: { position: 'absolute', top: 78, left: 10, right: 10, zIndex: 58, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E1E3F', borderRadius: 14, padding: 14, gap: 10, borderWidth: 1, borderColor: colors.primary },
-  callToBoardIconWrap: { width: scale(40), height: scale(40), borderRadius: 12, backgroundColor: 'rgba(91,46,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  sessionTitle: { fontSize: scale(15), fontWeight: '700', color: colors.white },
+  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: scale(5), backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'flex-start', paddingHorizontal: scale(8), paddingVertical: scale(3), borderRadius: scale(10), marginTop: scale(3) },
+  modeBadgeText: { color: colors.white, fontSize: scale(10), fontWeight: '600', textTransform: 'capitalize' },
+  coHostChip: { flexDirection: 'row', alignItems: 'center', gap: scale(5), backgroundColor: 'rgba(255,193,7,0.18)', borderWidth: scale(1), borderColor: 'rgba(255,193,7,0.6)', alignSelf: 'flex-start', paddingHorizontal: scale(8), paddingVertical: scale(3), borderRadius: scale(10), marginTop: scale(5) },
+  coHostChipText: { color: '#FFC107', fontSize: scale(10), fontWeight: '700' },
+  topRight: { alignItems: 'flex-end', gap: scale(4) },
+  recordingBadge: { flexDirection: 'row', alignItems: 'center', gap: scale(4), backgroundColor: 'rgba(255,59,59,0.2)', paddingHorizontal: scale(7), paddingVertical: scale(3), borderRadius: scale(7) },
+  recordingDot: { width: scale(7), height: scale(7), borderRadius: scale(4), backgroundColor: colors.red },
+  recordingText: { color: colors.red, fontSize: scale(10), fontWeight: '700' },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: scale(4), backgroundColor: 'rgba(46,204,113,0.2)', paddingHorizontal: scale(8), paddingVertical: scale(3), borderRadius: scale(7) },
+  liveDot: { width: scale(7), height: scale(7), borderRadius: scale(4), backgroundColor: colors.green },
+  liveText: { color: colors.green, fontSize: scale(10), fontWeight: '700' },
+  callToBoardCard: { position: 'absolute', top: scale(78), left: scale(10), right: scale(10), zIndex: 58, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E1E3F', borderRadius: scale(14), padding: scale(14), gap: scale(10), borderWidth: scale(1), borderColor: colors.primary },
+  callToBoardIconWrap: { width: scale(40), height: scale(40), borderRadius: scale(12), backgroundColor: 'rgba(91,46,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   callToBoardInfo: { flex: 1 },
-  callToBoardTitle: { color: colors.white, fontWeight: '700', fontSize: 14 },
-  callToBoardSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
-  callToBoardBtns: { gap: 6 },
-  acceptBtn: { backgroundColor: colors.green, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
-  acceptBtnText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  declineBtn2: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
-  declineBtn2Text: { color: 'rgba(255,255,255,0.6)', fontSize: 12 },
-  atBoardBanner: { position: 'absolute', top: 78, left: 10, right: 10, zIndex: 58, backgroundColor: 'rgba(91,46,255,0.85)', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  atBoardTextRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  atBoardText: { color: colors.white, fontSize: 13, fontWeight: '600' },
-  finishBtn: { backgroundColor: colors.white, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
-  finishBtnText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  callToBoardTitle: { color: colors.white, fontWeight: '700', fontSize: scale(14) },
+  callToBoardSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: scale(12), marginTop: scale(2) },
+  callToBoardBtns: { gap: scale(6) },
+  acceptBtn: { backgroundColor: colors.green, paddingHorizontal: scale(14), paddingVertical: scale(7), borderRadius: scale(8), alignItems: 'center' },
+  acceptBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(12) },
+  declineBtn2: { borderWidth: scale(1), borderColor: 'rgba(255,255,255,0.2)', paddingHorizontal: scale(14), paddingVertical: scale(7), borderRadius: scale(8), alignItems: 'center' },
+  declineBtn2Text: { color: 'rgba(255,255,255,0.6)', fontSize: scale(12) },
+  atBoardBanner: { position: 'absolute', top: scale(78), left: scale(10), right: scale(10), zIndex: 58, backgroundColor: 'rgba(91,46,255,0.85)', paddingVertical: scale(8), paddingHorizontal: scale(16), borderRadius: scale(10), borderWidth: scale(1), borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  atBoardTextRow: { flexDirection: 'row', alignItems: 'center', gap: scale(7) },
+  atBoardText: { color: colors.white, fontSize: scale(13), fontWeight: '600' },
+  finishBtn: { backgroundColor: colors.white, paddingHorizontal: scale(12), paddingVertical: scale(5), borderRadius: scale(8) },
+  finishBtnText: { color: colors.primary, fontSize: scale(12), fontWeight: '700' },
   mainContent: { ...StyleSheet.absoluteFillObject },
-  mainContentPortrait: {}, // orientation now only affects the strip/toolbar overlays below, not layout flow
-
-  // ── STRIP — compact for attendee screen ──
-  // top/bottom cleared so it starts below the floating topBar and stops
-  // above the (now always-present) bottom toolbar bar, in both the
-  // vertical-rail and horizontal-bar layouts below.
-  attendeeStrip: {
-    position: 'absolute', top: 78, bottom: scale(78), left: 0, zIndex: 40,
-    width: scale(80), backgroundColor: 'rgba(13,13,43,0.55)', paddingVertical: 6,
-  },
-  attendeeStripHorizontal: {
-    top: 78, bottom: undefined, left: 0, right: 0,
-    width: '100%', height: scale(92), paddingVertical: 0, paddingHorizontal: 6,
-  },
-  stripContent: { alignItems: 'center', gap: 8, paddingBottom: 8 },
-  stripContentHorizontal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  stripCell: { width: scale(68), alignItems: 'center', gap: 3 },
-  stripVideoWrap: {
-    width: scale(68), height: scale(54),
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    position: 'relative',
-    backgroundColor: '#1E1E3F',
-  },
-  stripVideoWrapActive: { borderColor: colors.green, borderWidth: 2 },
-  speakingRing: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 8, borderWidth: 2.5, borderColor: colors.green },
-  stripCoHostBadge: {
-    position: 'absolute', bottom: 4, right: 4,
-    backgroundColor: 'rgba(255,193,7,0.9)',
-    borderRadius: 8, paddingHorizontal: 4, paddingVertical: 2,
-    zIndex: 20,
-  },
-  stripMutedBadge: {
-    position: 'absolute', bottom: 4, left: 4,
-    backgroundColor: 'rgba(255,59,59,0.85)',
-    borderRadius: 8, paddingHorizontal: 4, paddingVertical: 2,
-    zIndex: 20,
-  },
-  stripDotBtn: {
-    position: 'absolute', top: 4, right: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 8, paddingHorizontal: 5, paddingVertical: 2,
-    zIndex: 20,
-  },
-  stripName: { color: 'rgba(255,255,255,0.6)', fontSize: 9, textAlign: 'center' },
+  mainContentPortrait: {}, // orientation now only affects the toolbar overlays below, not layout flow
 
   speakerView: { flex: 1, backgroundColor: '#111128', position: 'relative' },
-  noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
+  noVideoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: scale(10) },
+  noVideoText: { color: 'rgba(255,255,255,0.4)', fontSize: scale(14) },
   pipContainer: {
-    position: 'absolute', bottom: 70, right: scale(74),
+    position: 'absolute', bottom: scale(70), right: scale(74),
     width: scale(88), height: scale(116),
-    borderRadius: 12, overflow: 'hidden',
-    borderWidth: 2, borderColor: colors.primary,
+    borderRadius: scale(12), overflow: 'hidden',
+    borderWidth: scale(2), borderColor: colors.primary,
   },
   boardViewFull: { flex: 1, position: 'relative', zIndex: 50 },
-  pipStack: { position: 'absolute', top: 78, left: scale(92), zIndex: 60, gap: 6 },
-  stackPip: { width: scale(88), height: scale(114), borderRadius: 12, overflow: 'hidden', borderWidth: 2, borderColor: colors.primary, backgroundColor: '#1E1E3F' },
-  boardWatchBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, position: 'absolute', top: 78, right: scale(74), zIndex: 60, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
-  boardWatchText: { color: colors.white, fontSize: 11, fontWeight: '600' },
-  galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8, alignContent: 'flex-start' },
-  galleryCell: { width: scale(170), height: scale(130), borderRadius: 12, overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' },
-  galleryCellActive: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 2.5, borderColor: colors.green },
-  galleryCellDots: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 4, zIndex: 10 },
+  pipStack: { position: 'absolute', top: scale(78), left: scale(92), zIndex: 60, gap: scale(6) },
+  stackPip: { width: scale(88), height: scale(114), borderRadius: scale(12), overflow: 'hidden', borderWidth: scale(2), borderColor: colors.primary, backgroundColor: '#1E1E3F' },
+  boardWatchBadge: { flexDirection: 'row', alignItems: 'center', gap: scale(6), position: 'absolute', top: scale(78), right: scale(74), zIndex: 60, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: scale(10), paddingVertical: scale(6), borderRadius: scale(10) },
+  boardWatchText: { color: colors.white, fontSize: scale(11), fontWeight: '600' },
+  galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: scale(8), gap: scale(8), alignContent: 'flex-start' },
+  galleryCell: { 
+    width: isSmall ? Math.min(scale(150), width * 0.4) : scale(170), 
+    height: isSmall ? Math.min(scale(110), height * 0.2) : scale(130), 
+    borderRadius: scale(12), overflow: 'hidden', backgroundColor: '#1E1E3F', position: 'relative' 
+  },
+  galleryCellActive: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: scale(12), borderWidth: scale(2.5), borderColor: colors.green },
+  galleryCellDots: { position: 'absolute', top: scale(8), right: scale(8), backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: scale(10), paddingHorizontal: scale(7), paddingVertical: scale(4), zIndex: 10 },
   galleryCoHostBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    position: 'absolute', top: 8, left: 8,
+    flexDirection: 'row', alignItems: 'center', gap: scale(4),
+    position: 'absolute', top: scale(8), left: scale(8),
     backgroundColor: 'rgba(255,193,7,0.9)',
-    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: scale(10), paddingHorizontal: scale(8), paddingVertical: scale(3),
     zIndex: 10,
   },
-  galleryCoHostBadgeText: { color: '#3A2900', fontSize: 10, fontWeight: '700' },
-  viewToggle: { position: 'absolute', bottom: 14, alignSelf: 'center', flexDirection: 'row', backgroundColor: '#1E1E3F', borderRadius: 20, padding: 3, gap: 2 },
-  viewBtn: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 14 },
+  galleryCoHostBadgeText: { color: '#3A2900', fontSize: scale(10), fontWeight: '700' },
+  viewToggle: { position: 'absolute', bottom: scale(14), alignSelf: 'center', flexDirection: 'row', backgroundColor: '#1E1E3F', borderRadius: scale(20), padding: scale(3), gap: scale(2) },
+  viewBtn: { paddingHorizontal: scale(14), paddingVertical: scale(5), borderRadius: scale(14) },
   viewBtnActive: { backgroundColor: colors.primary },
-  viewBtnText: { color: colors.white, fontSize: 11, fontWeight: '600' },
-  signalBadge: { position: 'absolute', top: 78, alignSelf: 'center', zIndex: 59, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(91,46,255,0.8)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 },
-  signalBadgeText: { color: colors.white, fontSize: 12, fontWeight: '600' },
+  viewBtnText: { color: colors.white, fontSize: scale(11), fontWeight: '600' },
+  signalBadge: { position: 'absolute', top: scale(78), alignSelf: 'center', zIndex: 59, flexDirection: 'row', alignItems: 'center', gap: scale(8), backgroundColor: 'rgba(91,46,255,0.8)', paddingHorizontal: scale(14), paddingVertical: scale(7), borderRadius: scale(20) },
+  signalBadgeText: { color: colors.white, fontSize: scale(12), fontWeight: '600' },
   // Always a full-width bottom bar now — see toolBtnSize in the component
   // for how button size (and therefore the bar's own height) adapts.
   toolbarScroll: {
     position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 40,
-    paddingVertical: 8, backgroundColor: 'rgba(13,13,43,0.55)',
+    paddingVertical: scale(8), backgroundColor: 'rgba(13,13,43,0.55)',
+    paddingBottom: insets.bottom > 0 ? insets.bottom + scale(8) : scale(8),
   },
   toolbar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: TOOLBAR_H_PADDING / 2,
   },
-  toolBtn: { borderRadius: 10, backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  toolBtn: { borderRadius: scale(10), backgroundColor: '#1E1E3F', alignItems: 'center', justifyContent: 'center', gap: scale(2) },
   toolBtnMuted: { backgroundColor: 'rgba(255,59,59,0.2)' },
-  toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: 1, borderColor: colors.primary },
+  toolBtnActive: { backgroundColor: 'rgba(91,46,255,0.4)', borderWidth: scale(1), borderColor: colors.primary },
   toolBtnRed: { backgroundColor: 'rgba(255,59,59,0.3)' },
   // marginLeft (not marginTop) now that the toolbar is always a row —
   // still reads as "set apart from the rest" via the small extra gap.
-  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginLeft: 8 },
-  toolLabel: { fontSize: 7, color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
+  toolBtnEnd: { backgroundColor: 'rgba(255,59,59,0.5)', marginLeft: scale(8) },
+  toolLabel: { fontSize: scale(7), color: 'rgba(255,255,255,0.5)', fontWeight: '600', textAlign: 'center' },
   toolBadge: {
     position: 'absolute',
-    top: 2,
-    right: 6,
+    top: scale(2),
+    right: scale(6),
     backgroundColor: colors.red,
-    borderRadius: 9,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 3,
+    borderRadius: scale(9),
+    minWidth: scale(16),
+    height: scale(16),
+    paddingHorizontal: scale(3),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolBadgeText: { color: colors.white, fontSize: 9, fontWeight: '700' },
+  toolBadgeText: { color: colors.white, fontSize: scale(9), fontWeight: '700' },
   reactionsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  reactionsPanel: { backgroundColor: '#1E1E3F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 14 },
-  reactionsPanelTitle: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  signalsRow: { flexDirection: 'row', gap: 10 },
-  signalBtn: { flex: 1, alignItems: 'center', gap: 6, padding: 12, backgroundColor: '#2E2E5F', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  reactionsPanel: { backgroundColor: '#1E1E3F', borderTopLeftRadius: scale(24), borderTopRightRadius: scale(24), padding: scale(24), gap: scale(14) },
+  reactionsPanelTitle: { color: 'rgba(255,255,255,0.6)', fontSize: scale(11), fontWeight: '700', letterSpacing: 1 },
+  signalsRow: { flexDirection: 'row', gap: scale(10) },
+  signalBtn: { flex: 1, alignItems: 'center', gap: scale(6), padding: scale(12), backgroundColor: '#2E2E5F', borderRadius: scale(14), borderWidth: scale(1), borderColor: 'rgba(255,255,255,0.1)' },
   signalBtnActive: { borderColor: colors.primary, backgroundColor: 'rgba(91,46,255,0.3)' },
-  signalBtnLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', textAlign: 'center', fontWeight: '600' },
-  reactionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
-  reactionBtn: { width: scale(60), height: scale(60), borderRadius: 16, backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' },
-  reactionEmoji: { fontSize: 30 },
+  signalBtnLabel: { fontSize: scale(10), color: 'rgba(255,255,255,0.7)', textAlign: 'center', fontWeight: '600' },
+  reactionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: scale(12), justifyContent: 'center' },
+  reactionBtn: { 
+    width: isSmall ? Math.min(scale(52), width * 0.12) : scale(60), 
+    height: isSmall ? Math.min(scale(52), width * 0.12) : scale(60), 
+    borderRadius: scale(16), backgroundColor: '#2E2E5F', alignItems: 'center', justifyContent: 'center' 
+  },
+  reactionEmoji: { fontSize: isSmall ? scale(24) : scale(30) },
   modOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modDropdown: { backgroundColor: '#1E1E3F', borderRadius: 14, padding: 16, width: scale(250), maxWidth: '92%', borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
-  modDropdownHeader: { color: '#FFC107', fontWeight: '700', fontSize: 14, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  modDropdownItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  modDropdownText: { fontSize: 14, color: colors.white },
+  modDropdown: { 
+    backgroundColor: '#1E1E3F', 
+    borderRadius: scale(14), 
+    padding: scale(16), 
+    width: isSmall ? Math.min(scale(230), width * 0.88) : scale(250), 
+    maxWidth: '92%', 
+    borderWidth: scale(1), 
+    borderColor: 'rgba(255,193,7,0.4)' 
+  },
+  modDropdownHeader: { color: '#FFC107', fontWeight: '700', fontSize: scale(14), paddingHorizontal: scale(10), paddingVertical: scale(10), borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  modDropdownItem: { flexDirection: 'row', alignItems: 'center', gap: scale(10), paddingVertical: scale(11), paddingHorizontal: scale(10), borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  modDropdownText: { fontSize: scale(14), color: colors.white },
   modDropdownTextDanger: { color: colors.red },
-  modDropdownClose: { paddingVertical: 10, alignItems: 'center' },
-  modDropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
-  }), [scale]);
+  modDropdownClose: { paddingVertical: scale(10), alignItems: 'center' },
+  modDropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: scale(12) },
+  }), [scale, isSmall, width, height]);
 }

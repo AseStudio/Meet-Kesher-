@@ -46,6 +46,7 @@ export default function Profile({ navigation }) {
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sessionCount, setSessionCount] = useState(0);
   const [editingUsername, setEditingUsername] = useState(false);
@@ -69,6 +70,13 @@ export default function Profile({ navigation }) {
         .single();
 
       setProfile(prof);
+
+      // ensure_current_period() creates this month's row on first
+      // touch if it doesn't exist yet — a user who hasn't hosted or
+      // attended anything this month still gets a correct starting
+      // balance shown here, not a blank/missing state.
+      const { data: usageRow } = await supabase.rpc('get_my_usage');
+      setUsage(usageRow);
 
       const { count } = await supabase
         .from('session_attendees')
@@ -229,31 +237,56 @@ export default function Profile({ navigation }) {
         {/* Subscription */}
         <View style={styles.subscriptionCard}>
           <View style={styles.subLeft}>
-            <View style={[styles.subIconWrap, profile?.is_premium && styles.subIconWrapPremium]}>
+            <View style={[styles.subIconWrap, profile?.plan && profile.plan !== 'free' && styles.subIconWrapPremium]}>
               <Ionicons
-                name={profile?.is_premium ? 'sparkles' : 'pricetag-outline'}
+                name={profile?.plan && profile.plan !== 'free' ? 'sparkles' : 'pricetag-outline'}
                 size={19}
-                color={profile?.is_premium ? palette.premium : palette.primary}
+                color={profile?.plan && profile.plan !== 'free' ? palette.premium : palette.primary}
               />
             </View>
             <View style={styles.subTextWrap}>
-              <Text style={styles.subPlan}>{profile?.is_premium ? 'Premium Plan' : 'Free Plan'}</Text>
+              <Text style={styles.subPlan}>
+                {{ free: 'Free Plan', pro: 'Pro Plan', max: 'Max Plan', premium: 'Premium Plan' }[profile?.plan] || 'Free Plan'}
+              </Text>
               <Text style={styles.subDesc}>
-                {profile?.is_premium ? 'No ads in your feed — thanks for supporting Kesher' : 'Ads in your feed'}
+                {profile?.plan && profile.plan !== 'free' ? 'No ads in your feed — thanks for supporting Kesher' : 'Ads in your feed'}
               </Text>
             </View>
           </View>
-          {!profile?.is_premium && (
+          {(!profile?.plan || profile.plan === 'free') && (
             <TouchableOpacity
               style={styles.upgradeBtn}
               activeOpacity={0.85}
-              onPress={() => showAlert('Kesher Premium', 'Premium subscriptions are coming soon.')}
+              onPress={() => showAlert('Kesher Premium', 'Paid plans are coming soon.')}
             >
               <Text style={styles.upgradeBtnText}>Upgrade</Text>
               <Ionicons name="sparkles" size={13} color={palette.surface} />
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Minutes left this month */}
+        {usage && (
+          <View style={styles.usageCard}>
+            <View style={styles.usageRow}>
+              <Ionicons name="videocam-outline" size={16} color={palette.primary} />
+              <Text style={styles.usageLabel}>Hosting minutes left</Text>
+              <Text style={styles.usageValue}>{usage.host_minutes_balance}</Text>
+            </View>
+            {profile?.plan && profile.plan !== 'free' && (
+              <View style={styles.usageRow}>
+                <Ionicons name="radio-button-on" size={14} color={palette.premium} />
+                <Text style={styles.usageLabel}>Recording minutes left</Text>
+                <Text style={styles.usageValue}>{usage.recording_minutes_balance}</Text>
+              </View>
+            )}
+            <Text style={styles.usageNote}>
+              {profile?.plan && profile.plan !== 'free'
+                ? 'Unused minutes roll over to next month.'
+                : 'Resets to a fresh 30 minutes on the 1st of each month.'}
+            </Text>
+          </View>
+        )}
 
         {/* Settings */}
         <View style={styles.settingsCard}>
@@ -390,6 +423,16 @@ const styles = StyleSheet.create({
   subTextWrap: { flex: 1 },
   subPlan: { fontSize: 14.5, fontWeight: '700', color: palette.ink },
   subDesc: { fontSize: 11.5, color: palette.inkMuted, marginTop: 2, fontWeight: '500' },
+
+  // ── Usage ──
+  usageCard: {
+    backgroundColor: palette.surface, marginHorizontal: 20, marginTop: 10,
+    borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
+  },
+  usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  usageLabel: { flex: 1, fontSize: 12.5, color: palette.inkMuted, fontWeight: '600' },
+  usageValue: { fontSize: 14, color: palette.ink, fontWeight: '800' },
+  usageNote: { fontSize: 11, color: palette.neutralText, fontWeight: '500', marginTop: 2 },
   upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: palette.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
   upgradeBtnText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
 

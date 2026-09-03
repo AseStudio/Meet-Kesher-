@@ -75,7 +75,7 @@ export function useSessionExitGuard({ role, sessionId, getUserId, enabled = true
     const fireExit = () => {
       const token = tokenRef.current;
       if (role === 'host') {
-        keepaliveUpdate('sessions', { id: sessionId }, { status: 'ended' }, token);
+        keepaliveUpdate('sessions', { id: sessionId }, { status: 'ended', ended_at: new Date().toISOString() }, token);
       } else {
         const uid = getUserId ? getUserId() : null;
         if (!uid) return;

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens.
@@ -44,13 +45,39 @@ function ModeIcon({ mode, size = 17, color = palette.primary }) {
 
 export default function EndSession({ navigation, route }) {
   const session = route.params?.session;
+  const recordingPath = route.params?.recordingPath;
   const [attendees, setAttendees] = useState([]);
   const [duration, setDuration] = useState('');
   const [loading, setLoading] = useState(true);
+  const [downloadingRecording, setDownloadingRecording] = useState(false);
 
   useEffect(() => {
     loadSessionSummary();
   }, []);
+
+  // Generated fresh on tap rather than once on mount — a signed URL is
+  // time-limited, and there's no reason to burn that window before the
+  // host has even decided to download it.
+  const downloadRecording = async () => {
+    if (!recordingPath || downloadingRecording) return;
+    setDownloadingRecording(true);
+    try {
+      const { data, error } = await supabase.storage
+        .from('session-recordings')
+        .createSignedUrl(recordingPath, 60 * 60); // 1 hour, plenty for a single download
+      if (error) throw error;
+
+      if (Platform.OS === 'web') {
+        window.open(data.signedUrl, '_blank');
+      } else {
+        await Linking.openURL(data.signedUrl);
+      }
+    } catch (e) {
+      showAlert('Could not open recording', e.message || 'Please try again.');
+    } finally {
+      setDownloadingRecording(false);
+    }
+  };
 
   const loadSessionSummary = async () => {
     try {
@@ -153,6 +180,24 @@ export default function EndSession({ navigation, route }) {
 
         {/* Action Buttons */}
         <View style={styles.buttonCol}>
+          {recordingPath && (
+            <TouchableOpacity
+              style={styles.recordingBtn}
+              onPress={downloadRecording}
+              disabled={downloadingRecording}
+              activeOpacity={0.85}
+            >
+              {downloadingRecording
+                ? <ActivityIndicator color={palette.surface} />
+                : (
+                  <>
+                    <Ionicons name="download-outline" size={17} color={palette.surface} />
+                    <Text style={styles.recordingBtnText}>Download Recording</Text>
+                  </>
+                )
+              }
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={() => navigation.navigate('SubmissionsInbox')}
@@ -223,6 +268,8 @@ const styles = StyleSheet.create({
   avatarText: { color: palette.surface, fontWeight: '700', fontSize: 13 },
   avatarName: { fontSize: 10, color: palette.inkMuted, maxWidth: 48, fontWeight: '500' },
   buttonCol: { width: '100%', gap: 12 },
+  recordingBtn: { flexDirection: 'row', gap: 8, backgroundColor: '#7C3AED', paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  recordingBtnText: { color: palette.surface, fontSize: 15.5, fontWeight: '800', letterSpacing: -0.2 },
   primaryBtn: { flexDirection: 'row', gap: 8, backgroundColor: palette.primary, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', ...primaryShadow },
   primaryBtnText: { color: palette.surface, fontSize: 15.5, fontWeight: '800', letterSpacing: -0.2 },
   secondaryBtn: { flexDirection: 'row', gap: 8, backgroundColor: palette.surface, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: palette.primary },

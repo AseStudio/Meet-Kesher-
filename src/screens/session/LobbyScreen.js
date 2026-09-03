@@ -346,7 +346,7 @@ export default function LobbyScreen({ navigation, route }) {
         // timestamp set here, check-expired-lobbies' stale-live-session
         // check could catch a session that JUST started before the host's
         // client ever gets a chance to prove it's actually there.
-        .update({ status: 'live', last_seen_at: new Date().toISOString() })
+        .update({ status: 'live', started_at: new Date().toISOString(), last_seen_at: new Date().toISOString() })
         .eq('id', session.id);
       if (error) throw error;
       setShowExpiredModal(false);
