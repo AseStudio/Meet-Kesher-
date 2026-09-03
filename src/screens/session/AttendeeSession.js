@@ -38,7 +38,7 @@ export default function AttendeeSession({ navigation, route }) {
   const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
   const insets = useSafeAreaInsets();
   const isPortraitPhone = !isTablet && height > width;
-  const styles = useAttendeeSessionStyles(scale, isSmall, width, height);
+  const styles = useAttendeeSessionStyles(scale, isSmall, width, height, insets);
 
   // If the attendee closes the browser tab instead of tapping Leave, this
   // registers the leave immediately instead of leaving a stale row that
@@ -1192,7 +1192,7 @@ export default function AttendeeSession({ navigation, route }) {
   );
 }
 
-function useAttendeeSessionStyles(scale, isSmall, width, height) {
+function useAttendeeSessionStyles(scale, isSmall, width, height, insets) {
   return useMemo(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A', position: 'relative' },
   topBar: {
@@ -1328,5 +1328,5 @@ function useAttendeeSessionStyles(scale, isSmall, width, height) {
   modDropdownTextDanger: { color: colors.red },
   modDropdownClose: { paddingVertical: scale(10), alignItems: 'center' },
   modDropdownCloseText: { color: 'rgba(255,255,255,0.4)', fontSize: scale(12) },
-  }), [scale, isSmall, width, height]);
+  }), [scale, isSmall, width, height, insets]);
 }

@@ -36,7 +36,7 @@ export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
   const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
   const insets = useSafeAreaInsets();
-  const styles = useSessionMainStyles(scale, isSmall, width, height);
+  const styles = useSessionMainStyles(scale, isSmall, width, height, insets);
 
   // If the host closes the browser tab instead of tapping End, this ends
   // the session immediately so it doesn't keep running as an empty shell.
@@ -1785,7 +1785,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
   );
 }
 
-function useSessionMainStyles(scale, isSmall, width, height) {
+function useSessionMainStyles(scale, isSmall, width, height, insets) {
   return useMemo(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A1A', position: 'relative' },
   topBar: {
@@ -2238,5 +2238,5 @@ function useSessionMainStyles(scale, isSmall, width, height) {
     borderRadius: scale(8) 
   },
   declineBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(12) },
-  }), [scale, isSmall, width, height]);
+  }), [scale, isSmall, width, height, insets]);
 }
