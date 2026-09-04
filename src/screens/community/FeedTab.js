@@ -218,9 +218,16 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   const [myReactions, setMyReactions] = useState(new Set());
   const [reactionCounts, setReactionCounts] = useState({});
   const [commentCounts, setCommentCounts] = useState({});
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const load = useCallback(async (isRefresh) => {
-    isRefresh ? setRefreshing(true) : setLoading(true);
+  const load = useCallback(async (isRefresh, pageNum = 1) => {
+    if (pageNum === 1) {
+      isRefresh ? setRefreshing(true) : setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
     try {
       // getSession() reads the already-established session from local
       // storage — no network round trip. getUser() (the old version)
@@ -230,27 +237,34 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return;
-      setUserId(user.id);
+      
+      if (pageNum === 1) {
+        setUserId(user.id);
+      }
 
-      // Drafts and published posts don't depend on each other — only on
-      // user.id, which we already have — so there's no reason to wait
-      // for one before starting the other.
-      const [{ data: draftRows }, { data: publishedRows, error }] = await Promise.all([
-        supabase
+      // Fetch drafts only on first page
+      let draftRows = [];
+      if (pageNum === 1) {
+        const { data: draftData } = await supabase
           .from('feed_posts')
           .select('*')
           .eq('author_id', user.id)
           .eq('status', 'draft')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('feed_posts')
-          .select('*, channels(name), profiles(full_name), feed_post_media(id, url, position)')
-          .eq('status', 'published')
-          .order('created_at', { ascending: false })
-          .limit(50),
-      ]);
+          .order('created_at', { ascending: false });
+        draftRows = draftData || [];
+        setDrafts(draftRows);
+      }
+
+      // Fetch published posts with pagination
+      const offset = (pageNum - 1) * 20;
+      const { data: publishedRows, error } = await supabase
+        .from('feed_posts')
+        .select('*, channels(name), profiles(full_name), feed_post_media(id, url, position)')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + 19);
+      
       if (error) throw error;
-      setDrafts(draftRows || []);
 
       // feed_post_media comes back unordered from the embed — sort by
       // position client-side rather than fighting PostgREST's embedded-
@@ -260,26 +274,9 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
         feed_post_media: (p.feed_post_media || []).slice().sort((a, b) => a.position - b.position),
       }));
 
-      const postIds = sorted.map((p) => p.id);
-      let counts = {};
-      let mine = new Set();
-      let cCounts = {};
-
-      if (postIds.length > 0) {
-        // Same reasoning — reactions and comments only depend on
-        // postIds, not on each other, so fetch both at once instead of
-        // one after the other.
-        const [{ data: reactionRows }, { data: commentRows }] = await Promise.all([
-          supabase.from('feed_post_reactions').select('post_id, user_id').in('post_id', postIds),
-          supabase.from('feed_post_comments').select('post_id').in('post_id', postIds),
-        ]);
-        (reactionRows || []).forEach((r) => {
-          counts[r.post_id] = (counts[r.post_id] || 0) + 1;
-          if (r.user_id === user.id) mine.add(r.post_id);
-        });
-        (commentRows || []).forEach((c) => {
-          cCounts[c.post_id] = (cCounts[c.post_id] || 0) + 1;
-        });
+      // Check if we have more posts to load
+      if (sorted.length < 20) {
+        setHasMore(false);
       }
 
       // Ranking happens exactly once here, baked into the order `posts`
@@ -288,15 +285,60 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       // commenting on a post mid-scroll would reshuffle the whole feed
       // under someone's thumb. This only reshuffles on an actual
       // load/refresh, matching "ranked, but only when refreshed."
-      setPosts(rankPosts(sorted, counts, cCounts));
-      setReactionCounts(counts);
-      setMyReactions(mine);
-      setCommentCounts(cCounts);
+      const ranked = rankPosts(sorted, {}, {});
+      
+      if (pageNum === 1) {
+        // First page: replace all posts immediately
+        setPosts(ranked);
+        setPage(1);
+        setHasMore(sorted.length >= 20); // Reset hasMore based on first page results
+      } else {
+        // Subsequent pages: simply append new posts at the end (already sorted by created_at)
+        // We don't re-rank to avoid reshuffling the entire feed
+        setPosts((prev) => [...prev, ...ranked]);
+      }
+      
+      // Now fetch counts for these posts (this can happen after posts are displayed)
+      const postIds = sorted.map((p) => p.id);
+      if (postIds.length > 0) {
+        const [{ data: reactionRows }, { data: commentRows }] = await Promise.all([
+          supabase.from('feed_post_reactions').select('post_id, user_id').in('post_id', postIds),
+          supabase.from('feed_post_comments').select('post_id').in('post_id', postIds),
+        ]);
+        const newCounts = {};
+        const newMine = new Set();
+        const newCCounts = {};
+        
+        (reactionRows || []).forEach((r) => {
+          newCounts[r.post_id] = (newCounts[r.post_id] || 0) + 1;
+          if (r.user_id === user.id) newMine.add(r.post_id);
+        });
+        (commentRows || []).forEach((c) => {
+          newCCounts[c.post_id] = (newCCounts[c.post_id] || 0) + 1;
+        });
+        
+        // Update counts after posts are already displayed
+        if (pageNum === 1) {
+          setReactionCounts(newCounts);
+          setMyReactions(newMine);
+          setCommentCounts(newCCounts);
+        } else {
+          setReactionCounts((prev) => ({ ...prev, ...newCounts }));
+          setMyReactions((prev) => new Set([...prev, ...newMine]));
+          setCommentCounts((prev) => ({ ...prev, ...newCCounts }));
+        }
+      }
+      
+      setPage(pageNum);
     } catch (e) {
       showAlert('Could not load feed', e.message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (pageNum === 1) {
+        setLoading(false);
+        setRefreshing(false);
+      } else {
+        setLoadingMore(false);
+      }
     }
   }, []);
 
@@ -305,7 +347,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   // React Navigation's 'focus' event fires on first mount too, so a
   // separate mount-only effect calling load() would just double-fetch.
   useEffect(() => {
-    const unsub = navigation.addListener('focus', () => load(false));
+    const unsub = navigation.addListener('focus', () => load(false, 1));
     return unsub;
   }, [navigation, load]);
 
@@ -327,7 +369,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           // Only update if this is a new post we haven't seen yet
           const existingIds = new Set(posts.map(p => p.id));
           if (!existingIds.has(payload.new.id)) {
-            load(false); // Refresh to get the new post with all its joins
+            load(false, 1); // Refresh to get the new post with all its joins
           }
         }
       )
@@ -352,10 +394,10 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       .eq('id', post.id);
     if (error) {
       showAlert('Could not update', error.message);
-      load(false);
+      load(false, 1);
       return;
     }
-    if (decision === 'published') load(false);
+    if (decision === 'published') load(false, 1);
   };
 
   const toggleReaction = async (postId) => {
@@ -401,7 +443,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           const { error } = await supabase.from('feed_posts').delete().eq('id', post.id);
           if (error) {
             showAlert('Could not delete', error.message);
-            load(false);
+            load(false, 1);
           }
         },
       },
@@ -435,7 +477,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           // status = 'published'), but there's no local signal telling
           // us that happened right now, so just refresh to be sure this
           // person doesn't keep seeing a post they just reported.
-          load(false);
+          load(false, 1);
         },
       },
     ]);
@@ -470,7 +512,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={palette.primary} colors={[palette.primary]} />
+            <RefreshControl refreshing={refreshing} onRefresh={() => load(true, 1)} tintColor={palette.primary} colors={[palette.primary]} />
           }
           ListHeaderComponent={
             drafts.length > 0 ? (
@@ -619,6 +661,9 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
               <Text style={styles.emptyStateText}>Nothing in the feed yet — be the first to post something.</Text>
             </View>
           }
+          ListFooterComponent={loadingMore ? <ActivityIndicator style={{ padding: 20 }} color={palette.primary} /> : null}
+          onEndReached={() => hasMore && !loadingMore && !refreshing && load(false, page + 1)}
+          onEndReachedThreshold={0.5}
         />
       )}
     </View>
