@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput, Image, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,32 +55,16 @@ export default function Profile({ navigation }) {
   const [usernameError, setUsernameError] = useState('');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Use light mode palette (dark mode removed)
-  const themePalette = {
-    primary: colors.primary,
-    primaryBright: colors.primaryLight,
-    primaryDeep: colors.primaryDark,
-    primarySoft: colors.background,
-    ink: colors.text,
-    inkMuted: colors.textLight,
-    surface: colors.white,
-    canvas: colors.background,
-    line: colors.greyLight,
-    success: colors.green,
-    successSoft: '#E7FBF0',
-    danger: colors.red,
-    dangerSoft: '#FFE9E9',
-    amber: colors.yellow,
-    amberSoft: '#FFF3DE',
-    premium: '#7C3AED',
-    premiumSoft: '#F1E8FE',
-    neutralSoft: colors.greyLight,
-    neutralText: colors.grey,
-  };
+  // Use light mode palette (dark mode removed). Same tokens as the
+  // module-level `palette` above — kept local so this screen doesn't
+  // depend on module-level state if that ever changes.
+  const themePalette = palette;
 
-  // Compute cardShadow and styles
-  const cardShadow = getCardShadow();
-  const styles = getStyles(themePalette);
+  // `palette` is a stable module-level object, so these only need to be
+  // computed once (not on every render — this screen re-renders often
+  // due to the profile/usage/username state above).
+  const cardShadow = useMemo(() => getCardShadow(), []);
+  const styles = useMemo(() => getStyles(themePalette, cardShadow), [themePalette, cardShadow]);
 
   useEffect(() => {
     loadProfile();
@@ -186,10 +170,23 @@ export default function Profile({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user');
 
-      const fileName = `${user.id}-${Date.now()}.jpg`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      // ImagePicker gives back a local file `uri`, not binary data.
+      // Passing that asset object straight to supabase.storage.upload()
+      // sends the wrong payload (an object, not a file), so the upload
+      // silently fails or throws a type error. Fetch the local file and
+      // read it into an ArrayBuffer first — that's what upload() needs.
+      const fileExt = (imageAsset.uri.split('.').pop() || 'jpg').split('?')[0];
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+
+      const response = await fetch(imageAsset.uri);
+      const arrayBuffer = await response.arrayBuffer();
+
+      const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(fileName, imageAsset);
+        .upload(fileName, arrayBuffer, {
+          contentType: imageAsset.mimeType || 'image/jpeg',
+          upsert: true,
+        });
 
       if (uploadError) throw uploadError;
 
@@ -477,9 +474,12 @@ const getCardShadow = () => Platform.select({
 });
 
 // Helper function to create styles (light mode only)
-const getStyles = (themePal) => StyleSheet.create({
+// `cardShadow` is passed in explicitly rather than relied on as a closure
+// variable — this function is defined at module scope, so it has no
+// access to the `cardShadow` declared inside the Profile component.
+const getStyles = (themePal, cardShadow) => StyleSheet.create({
 
-  container: { flex: 1, backgroundColor, canvas },
+  container: { flex: 1, backgroundColor: themePal.canvas },
   scroll: { paddingBottom: 50 },
 
   // ── Header ──
@@ -514,9 +514,9 @@ const getStyles = (themePal) => StyleSheet.create({
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
-  avatarText: { color, surface, fontSize: 28, fontWeight: '800' },
+  avatarText: { color: themePal.surface, fontSize: 28, fontWeight: '800' },
   avatarOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 21, fontWeight: '800', color, surface, letterSpacing: -0.3, marginTop: 2 },
+  name: { fontSize: 21, fontWeight: '800', color: themePal.surface, letterSpacing: -0.3, marginTop: 2 },
   email: { fontSize: 12.5, color: 'rgba(0,0,0,0.5)', fontWeight: '500' },
   usernameDisplayRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   usernameDisplayText: { fontSize: 12, color: 'rgba(0,0,0,0.5)', fontWeight: '600' },
@@ -531,12 +531,12 @@ const getStyles = (themePal) => StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.08)',
     paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20, marginTop: 2,
   },
-  roleBadgeText: { color, surface, fontWeight: '700', fontSize: 12.5 },
+  roleBadgeText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Stats ──
   statsRow: {
     flexDirection: 'row',
-    backgroundColor, surface,
+    backgroundColor: themePal.surface,
     marginHorizontal: 20,
     marginTop: -22,
     borderRadius: 18,
@@ -544,52 +544,52 @@ const getStyles = (themePal) => StyleSheet.create({
     ...cardShadow,
   },
   statCard: { flex: 1, alignItems: 'center', gap: 4 },
-  statDivider: { width: 1, backgroundColor, line, marginVertical: 4 },
-  statValue: { fontSize: 26, fontWeight: '800', color, primary, letterSpacing: -0.5 },
-  statValueSmall: { fontSize: 15, fontWeight: '800', color, primary, marginTop: 5 },
-  statLabel: { fontSize: 10.5, color, inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
+  statDivider: { width: 1, backgroundColor: themePal.line, marginVertical: 4 },
+  statValue: { fontSize: 26, fontWeight: '800', color: themePal.primary, letterSpacing: -0.5 },
+  statValueSmall: { fontSize: 15, fontWeight: '800', color: themePal.primary, marginTop: 5 },
+  statLabel: { fontSize: 10.5, color: themePal.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
 
   // ── Subscription ──
   subscriptionCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor, surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, padding: 16, ...cardShadow,
   },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor, primarySoft, alignItems: 'center', justifyContent: 'center' },
-  subIconWrapPremium: { backgroundColor, premiumSoft },
+  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  subIconWrapPremium: { backgroundColor: themePal.premiumSoft },
   subTextWrap: { flex: 1 },
-  subPlan: { fontSize: 14.5, fontWeight: '700', color, ink },
-  subDesc: { fontSize: 11.5, color, inkMuted, marginTop: 2, fontWeight: '500' },
+  subPlan: { fontSize: 14.5, fontWeight: '700', color: themePal.ink },
+  subDesc: { fontSize: 11.5, color: themePal.inkMuted, marginTop: 2, fontWeight: '500' },
 
   // ── Usage ──
   usageCard: {
-    backgroundColor, surface, marginHorizontal: 20, marginTop: 10,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 10,
     borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
   },
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  usageLabel: { flex: 1, fontSize: 12.5, color, inkMuted, fontWeight: '600' },
-  usageValue: { fontSize: 14, color, ink, fontWeight: '800' },
-  usageNote: { fontSize: 11, color, neutralText, fontWeight: '500', marginTop: 2 },
-  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor, primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
-  upgradeBtnText: { color, surface, fontWeight: '700', fontSize: 12.5 },
+  usageLabel: { flex: 1, fontSize: 12.5, color: themePal.inkMuted, fontWeight: '600' },
+  usageValue: { fontSize: 14, color: themePal.ink, fontWeight: '800' },
+  usageNote: { fontSize: 11, color: themePal.neutralText, fontWeight: '500', marginTop: 2 },
+  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePal.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
+  upgradeBtnText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Settings ──
   settingsCard: {
-    backgroundColor, surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, overflow: 'hidden', ...cardShadow,
   },
   settingRow: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
-  settingRowBorder: { borderBottomWidth: 1, borderBottomColor, line },
-  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor, primarySoft, alignItems: 'center', justifyContent: 'center' },
-  settingLabel: { flex: 1, fontSize: 14, color, ink, fontWeight: '600' },
+  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: themePal.line },
+  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  settingLabel: { flex: 1, fontSize: 14, color: themePal.ink, fontWeight: '600' },
 
   // ── Logout / version ──
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginHorizontal: 20, marginTop: 16,
-    backgroundColor, dangerSoft, paddingVertical: 15, borderRadius: 16,
+    backgroundColor: themePal.dangerSoft, paddingVertical: 15, borderRadius: 16,
   },
-  logoutText: { color, danger, fontSize: 15, fontWeight: '800' },
-  version: { textAlign: 'center', color, neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
+  logoutText: { color: themePal.danger, fontSize: 15, fontWeight: '800' },
+  version: { textAlign: 'center', color: themePal.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
 });
