@@ -44,7 +44,6 @@ const MEMBER_SINCE_FORMAT = (iso) => {
 };
 
 export default function Profile({ navigation }) {
-  const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [profile, setProfile] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -56,54 +55,32 @@ export default function Profile({ navigation }) {
   const [usernameError, setUsernameError] = useState('');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Apply theme to palette
-  const themePalette = darkMode
-    ? {
-        primary: colors.primary,
-        primaryBright: colors.primaryLight,
-        primaryDeep: colors.primaryDark,
-        primarySoft: colors.background,
-        ink: colors.white,
-        inkMuted: 'rgba(255,255,255,0.6)',
-        surface: '#1A1A2E',
-        canvas: '#0A0A1A',
-        line: '#2D2D44',
-        success: colors.green,
-        successSoft: '#2E8B57',
-        danger: colors.red,
-        dangerSoft: '#FF6B6B',
-        amber: colors.yellow,
-        amberSoft: '#FFA500',
-        premium: '#7C3AED',
-        premiumSoft: '#4C1D95',
-        neutralSoft: '#3A3A5A',
-        neutralText: 'rgba(255,255,255,0.5)',
-      }
-    : {
-        primary: colors.primary,
-        primaryBright: colors.primaryLight,
-        primaryDeep: colors.primaryDark,
-        primarySoft: colors.background,
-        ink: colors.text,
-        inkMuted: colors.textLight,
-        surface: colors.white,
-        canvas: colors.background,
-        line: colors.greyLight,
-        success: colors.green,
-        successSoft: '#E7FBF0',
-        danger: colors.red,
-        dangerSoft: '#FFE9E9',
-        amber: colors.yellow,
-        amberSoft: '#FFF3DE',
-        premium: '#7C3AED',
-        premiumSoft: '#F1E8FE',
-        neutralSoft: colors.greyLight,
-        neutralText: colors.grey,
-      };
+  // Use light mode palette (dark mode removed)
+  const themePalette = {
+    primary: colors.primary,
+    primaryBright: colors.primaryLight,
+    primaryDeep: colors.primaryDark,
+    primarySoft: colors.background,
+    ink: colors.text,
+    inkMuted: colors.textLight,
+    surface: colors.white,
+    canvas: colors.background,
+    line: colors.greyLight,
+    success: colors.green,
+    successSoft: '#E7FBF0',
+    danger: colors.red,
+    dangerSoft: '#FFE9E9',
+    amber: colors.yellow,
+    amberSoft: '#FFF3DE',
+    premium: '#7C3AED',
+    premiumSoft: '#F1E8FE',
+    neutralSoft: colors.greyLight,
+    neutralText: colors.grey,
+  };
 
-  // Compute cardShadow and styles based on current theme
-  const cardShadow = getCardShadow(darkMode);
-  const styles = getStyles(themePalette, darkMode);
+  // Compute cardShadow and styles
+  const cardShadow = getCardShadow();
+  const styles = getStyles(themePalette);
 
   useEffect(() => {
     loadProfile();
@@ -299,7 +276,6 @@ export default function Profile({ navigation }) {
   const settingsRows = [
     { icon: 'notifications-outline', label: 'Notifications', toggle: true, value: notifications, onChange: setNotifications },
     { icon: 'videocam-outline', label: 'Audio & Video Defaults', arrow: true },
-    { icon: 'moon-outline', label: 'Theme', toggle: true, value: darkMode, onChange: setDarkMode },
     { icon: 'lock-closed-outline', label: 'Privacy & Security', arrow: true },
     { icon: 'card-outline', label: 'Subscription & Billing', arrow: true },
     { icon: 'shield-checkmark-outline', label: 'Ban Management', arrow: true, onPress: () => navigation.navigate('BanManagement') },
@@ -346,7 +322,7 @@ export default function Profile({ navigation }) {
                 value={usernameInput}
                 onChangeText={(t) => setUsernameInput(sanitizeUsernameInput(t))}
                 placeholder="username"
-                placeholderTextColor={darkMode ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'}
+                placeholderTextColor={'rgba(0,0,0,0.4)'}
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoFocus
@@ -363,7 +339,7 @@ export default function Profile({ navigation }) {
               <Text style={styles.usernameDisplayText}>
                 {profile?.username ? `@${profile.username}` : 'Set a username'}
               </Text>
-              <Ionicons name="pencil" size={11} color={darkMode ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)'} />
+              <Ionicons name="pencil" size={11} color={'rgba(0,0,0,0.5)'} />
             </TouchableOpacity>
           )}
           {usernameError ? <Text style={styles.usernameErrorText}>{usernameError}</Text> : null}
@@ -493,17 +469,17 @@ export default function Profile({ navigation }) {
   );
 }
 
-// Helper function to create cardShadow based on darkMode
-const getCardShadow = (isDark) => Platform.select({
-  ios: { shadowColor: isDark ? '#000' : '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
+// Helper function to create cardShadow (light mode only)
+const getCardShadow = () => Platform.select({
+  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
   android: { elevation: 3 },
-  default: { boxShadow: isDark ? '0 6px 18px rgba(0,0,0,0.18)' : '0 6px 18px rgba(42,26,107,0.08)' },
+  default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
 });
 
-// Helper function to create styles based on themePalette and darkMode
-const getStyles = (themePal, isDark) => StyleSheet.create({
+// Helper function to create styles (light mode only)
+const getStyles = (themePal) => StyleSheet.create({
 
-  container: { flex: 1, backgroundColor: themePal.canvas },
+  container: { flex: 1, backgroundColor, canvas },
   scroll: { paddingBottom: 50 },
 
   // ── Header ──
@@ -523,7 +499,7 @@ const getStyles = (themePal, isDark) => StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 13,
-    backgroundColor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -534,33 +510,33 @@ const getStyles = (themePal, isDark) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.85)',
+    borderColor: 'rgba(0,0,0,0.1)',
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
-  avatarText: { color: themePal.surface, fontSize: 28, fontWeight: '800' },
+  avatarText: { color, surface, fontSize: 28, fontWeight: '800' },
   avatarOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 21, fontWeight: '800', color: themePal.surface, letterSpacing: -0.3, marginTop: 2 },
-  email: { fontSize: 12.5, color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.5)', fontWeight: '500' },
+  name: { fontSize: 21, fontWeight: '800', color, surface, letterSpacing: -0.3, marginTop: 2 },
+  email: { fontSize: 12.5, color: 'rgba(0,0,0,0.5)', fontWeight: '500' },
   usernameDisplayRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  usernameDisplayText: { fontSize: 12, color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.5)', fontWeight: '600' },
-  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  usernameAt: { fontSize: 12.5, color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.4)', fontWeight: '700' },
+  usernameDisplayText: { fontSize: 12, color: 'rgba(0,0,0,0.5)', fontWeight: '600' },
+  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  usernameAt: { fontSize: 12.5, color: 'rgba(0,0,0,0.4)', fontWeight: '700' },
   usernameEditInput: { fontSize: 12.5, color: themePal.ink, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
-  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: isDark ? 'rgba(255,255,255,0.9)' : themePal.surface, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
-  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : themePal.line, alignItems: 'center', justifyContent: 'center' },
+  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: themePal.surface, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
+  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: themePal.line, alignItems: 'center', justifyContent: 'center' },
   usernameErrorText: { fontSize: 10.5, color: themePal.danger, fontWeight: '600', marginTop: 4 },
   roleBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.08)',
     paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20, marginTop: 2,
   },
-  roleBadgeText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
+  roleBadgeText: { color, surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Stats ──
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: themePal.surface,
+    backgroundColor, surface,
     marginHorizontal: 20,
     marginTop: -22,
     borderRadius: 18,
@@ -568,52 +544,52 @@ const getStyles = (themePal, isDark) => StyleSheet.create({
     ...cardShadow,
   },
   statCard: { flex: 1, alignItems: 'center', gap: 4 },
-  statDivider: { width: 1, backgroundColor: themePal.line, marginVertical: 4 },
-  statValue: { fontSize: 26, fontWeight: '800', color: themePal.primary, letterSpacing: -0.5 },
-  statValueSmall: { fontSize: 15, fontWeight: '800', color: themePal.primary, marginTop: 5 },
-  statLabel: { fontSize: 10.5, color: themePal.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
+  statDivider: { width: 1, backgroundColor, line, marginVertical: 4 },
+  statValue: { fontSize: 26, fontWeight: '800', color, primary, letterSpacing: -0.5 },
+  statValueSmall: { fontSize: 15, fontWeight: '800', color, primary, marginTop: 5 },
+  statLabel: { fontSize: 10.5, color, inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
 
   // ── Subscription ──
   subscriptionCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor, surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, padding: 16, ...cardShadow,
   },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  subIconWrapPremium: { backgroundColor: themePal.premiumSoft },
+  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor, primarySoft, alignItems: 'center', justifyContent: 'center' },
+  subIconWrapPremium: { backgroundColor, premiumSoft },
   subTextWrap: { flex: 1 },
-  subPlan: { fontSize: 14.5, fontWeight: '700', color: themePal.ink },
-  subDesc: { fontSize: 11.5, color: themePal.inkMuted, marginTop: 2, fontWeight: '500' },
+  subPlan: { fontSize: 14.5, fontWeight: '700', color, ink },
+  subDesc: { fontSize: 11.5, color, inkMuted, marginTop: 2, fontWeight: '500' },
 
   // ── Usage ──
   usageCard: {
-    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 10,
+    backgroundColor, surface, marginHorizontal: 20, marginTop: 10,
     borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
   },
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  usageLabel: { flex: 1, fontSize: 12.5, color: themePal.inkMuted, fontWeight: '600' },
-  usageValue: { fontSize: 14, color: themePal.ink, fontWeight: '800' },
-  usageNote: { fontSize: 11, color: themePal.neutralText, fontWeight: '500', marginTop: 2 },
-  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePal.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
-  upgradeBtnText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
+  usageLabel: { flex: 1, fontSize: 12.5, color, inkMuted, fontWeight: '600' },
+  usageValue: { fontSize: 14, color, ink, fontWeight: '800' },
+  usageNote: { fontSize: 11, color, neutralText, fontWeight: '500', marginTop: 2 },
+  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor, primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
+  upgradeBtnText: { color, surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Settings ──
   settingsCard: {
-    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor, surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, overflow: 'hidden', ...cardShadow,
   },
   settingRow: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
-  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: themePal.line },
-  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  settingLabel: { flex: 1, fontSize: 14, color: themePal.ink, fontWeight: '600' },
+  settingRowBorder: { borderBottomWidth: 1, borderBottomColor, line },
+  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor, primarySoft, alignItems: 'center', justifyContent: 'center' },
+  settingLabel: { flex: 1, fontSize: 14, color, ink, fontWeight: '600' },
 
   // ── Logout / version ──
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginHorizontal: 20, marginTop: 16,
-    backgroundColor: themePal.dangerSoft, paddingVertical: 15, borderRadius: 16,
+    backgroundColor, dangerSoft, paddingVertical: 15, borderRadius: 16,
   },
-  logoutText: { color: themePal.danger, fontSize: 15, fontWeight: '800' },
-  version: { textAlign: 'center', color: themePal.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
+  logoutText: { color, danger, fontSize: 15, fontWeight: '800' },
+  version: { textAlign: 'center', color, neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
 });
