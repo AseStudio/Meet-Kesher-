@@ -309,6 +309,33 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
     return unsub;
   }, [navigation, load]);
 
+  // Realtime subscription for new feed posts - updates feed immediately when new posts are inserted
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel('feed_posts_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'feed_posts',
+          filter: `status=eq.published`,
+        },
+        (payload) => {
+          // Only update if this is a new post we haven't seen yet
+          const existingIds = new Set(posts.map(p => p.id));
+          if (!existingIds.has(payload.new.id)) {
+            load(false); // Refresh to get the new post with all its joins
+          }
+        }
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [userId, posts, load]);
+
   // Re-mixed only when the underlying posts actually change (a fresh
   // load or pull-to-refresh) — not on every render, so toggling a like
   // doesn't reshuffle ad positions under someone's thumb.
@@ -414,10 +441,29 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
     ]);
   };
 
+  // Skeleton loader items for better UX during initial load
+  const SkeletonLoader = () => (
+    <View style={styles.listContent}>
+      {[1, 2, 3, 4].map((i) => (
+        <View key={i} style={[styles.postCard, { opacity: 0.5 }]}>
+          <View style={styles.postHeader}>
+            <View style={[styles.postIconWrap, { backgroundColor: palette.line }]} />
+            <View style={{ flex: 1, height: 12, backgroundColor: palette.line, borderRadius: 4 }} />
+          </View>
+          <View style={{ marginBottom: 8 }}>
+            <View style={{ width: '60%', height: 16, backgroundColor: palette.line, borderRadius: 4, marginBottom: 4 }} />
+            <View style={{ width: '40%', height: 16, backgroundColor: palette.line, borderRadius: 4 }} />
+          </View>
+          <View style={{ width: '100%', height: 8, backgroundColor: palette.line, borderRadius: 4, marginBottom: 10 }} />
+        </View>
+      ))}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={palette.primary} />
+        <SkeletonLoader />
       ) : (
         <FlatList
           data={displayFeed}
