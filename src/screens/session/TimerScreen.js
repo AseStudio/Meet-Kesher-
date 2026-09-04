@@ -1,68 +1,149 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
-import { showAlert } from '../../lib/alert';
+import { supabase } from '../../lib/supabase';
 
-export default function TimerScreen({ navigation }) {
-  const [minutes, setMinutes] = useState('10');
-  const [seconds, setSeconds] = useState('00');
-  const [totalSeconds, setTotalSeconds] = useState(0);
-  // Was missing entirely — progress below referenced `initialTotal` with
-  // no state/variable behind it anywhere in the file, which throws a
-  // ReferenceError on every render (this screen couldn't mount at all).
-  // Needs to be separate from totalSeconds specifically because
-  // totalSeconds counts DOWN every second — the progress ring's "% of
-  // time remaining" math needs the ORIGINAL duration to stay fixed as
-  // the denominator, not shrink alongside the numerator.
-  const [initialTotal, setInitialTotal] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [started, setStarted] = useState(false);
+export default function TimerScreen({ navigation, route }) {
+  const session = route.params?.session;
+  const [hostMinutes, setHostMinutes] = useState(null);
+  const [isPremium, setIsPremium] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [notificationShown, setNotificationShown] = useState({ five: false, zero: false });
 
+  // Fetch host's usage and premium status
   useEffect(() => {
-    let interval = null;
-    if (running && totalSeconds > 0) {
-      interval = setInterval(() => {
-        setTotalSeconds(s => s - 1);
-      }, 1000);
-    } else if (totalSeconds === 0 && started) {
-      setRunning(false);
-    }
+    const loadData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          navigation.goBack();
+          return;
+        }
+
+        // Fetch premium status
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_premium')
+          .eq('id', user.id)
+          .maybeSingle();
+        setIsPremium(!!profile?.is_premium);
+
+        // Fetch hosting minutes balance
+        const { data: usageRow } = await supabase.rpc('get_my_usage');
+        if (usageRow && usageRow.host_minutes_balance !== null) {
+          setHostMinutes(Math.max(0, usageRow.host_minutes_balance));
+        } else {
+          setHostMinutes(0);
+        }
+      } catch (e) {
+        console.error('Error loading host minutes:', e);
+        if (Platform.OS === 'web') {
+          window.alert('Error: Could not load hosting minutes.');
+        } else {
+          Alert.alert('Error', 'Could not load hosting minutes.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Countdown effect
+  useEffect(() => {
+    if (hostMinutes === null || hostMinutes === 0) return;
+
+    const interval = setInterval(() => {
+      setHostMinutes(prev => {
+        if (prev === null) return null;
+        const newMinutes = Math.max(0, prev - 1);
+        
+        // Show notification at 5 minutes
+        if (newMinutes === 5 && !notificationShown.five) {
+          setNotificationShown(prev => ({ ...prev, five: true }));
+          if (Platform.OS === 'web') {
+            window.alert('5 session minutes remaining\n\nupgrade to Premium for extended session minutes');
+          } else {
+            Alert.alert('5 session minutes remaining', 'upgrade to Premium for extended session minutes');
+          }
+          if (!isPremium) {
+            setShowUpgrade(true);
+          }
+        }
+        
+        // Show notification and end session at 0 minutes
+        if (newMinutes === 0 && !notificationShown.zero) {
+          setNotificationShown(prev => ({ ...prev, zero: true }));
+          if (Platform.OS === 'web') {
+            window.alert('You have exhausted your session minutes');
+          } else {
+            Alert.alert('Session Ended', 'You have exhausted your session minutes');
+          }
+          // End the session
+          endSession();
+        }
+        
+        return newMinutes;
+      });
+    }, 60000); // Update every minute
+
     return () => clearInterval(interval);
-  }, [running, totalSeconds]);
+  }, [hostMinutes, notificationShown, isPremium]);
 
-  const displayMins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-  const displaySecs = (totalSeconds % 60).toString().padStart(2, '0');
-  const progress = started && initialTotal > 0 ? (totalSeconds / initialTotal) * 100 : 100;
-  const isLow = totalSeconds <= 30 && started;
+  const endSession = async () => {
+    if (!session?.id) {
+      navigation.goBack();
+      return;
+    }
 
- const handleStart = () => {
-  const m = parseInt(minutes) || 0;
-  const s = parseInt(seconds) || 0;
-  const total = (m * 60) + s;
-  if (total <= 0) {
-    showAlert('Invalid Time', 'Please enter a time greater than 0.');
-    return;
-  }
-  setTotalSeconds(total);
-  setInitialTotal(total);
-  setStarted(true);
-  setRunning(true);
-};
-  const handleReset = () => {
-    setRunning(false);
-    setStarted(false);
-    setTotalSeconds(0);
-    setInitialTotal(0);
+    try {
+      // Update session status to ended
+      await supabase
+        .from('sessions')
+        .update({ status: 'ended', ended_at: new Date().toISOString() })
+        .eq('id', session.id);
+
+      // Navigate back to end session screen
+      navigation.navigate('EndSession', { session, recordingPath: null });
+    } catch (e) {
+      console.error('Error ending session:', e);
+      if (Platform.OS === 'web') {
+        window.alert(`Could not end session: ${e.message}`);
+      } else {
+        Alert.alert('Could not end session', e.message);
+      }
+      navigation.goBack();
+    }
   };
 
-  const presets = [
-    { label: '1 min', mins: 1, secs: 0 },
-    { label: '5 mins', mins: 5, secs: 0 },
-    { label: '10 mins', mins: 10, secs: 0 },
-    { label: '15 mins', mins: 15, secs: 0 },
-    { label: '30 mins', mins: 30, secs: 0 },
-  ];
+  const formatMinutes = (mins) => {
+    if (mins === null) return '--';
+    return mins.toString();
+  };
+
+  const isLow = hostMinutes !== null && hostMinutes <= 5;
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} activeOpacity={0.75}>
+            <Ionicons name="arrow-back" size={20} color={colors.white} />
+          </TouchableOpacity>
+          <View style={styles.headerTitleRow}>
+            <Ionicons name="timer-outline" size={16} color={colors.white} />
+            <Text style={styles.headerTitle}>Session Minutes</Text>
+          </View>
+          <View style={{ width: 20 }} />
+        </View>
+        <View style={styles.content}>
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -72,116 +153,43 @@ export default function TimerScreen({ navigation }) {
         </TouchableOpacity>
         <View style={styles.headerTitleRow}>
           <Ionicons name="timer-outline" size={16} color={colors.white} />
-          <Text style={styles.headerTitle}>Session Timer</Text>
+          <Text style={styles.headerTitle}>Session Minutes</Text>
         </View>
         <View style={{ width: 20 }} />
       </View>
 
       <View style={styles.content}>
-        {/* Timer Display */}
-        <View style={[styles.timerRing, isLow && styles.timerRingRed]}>
-          <View style={styles.timerInner}>
-            {started ? (
-              <>
-                <Text style={[styles.timerDisplay, isLow && styles.timerDisplayRed]}>
-                  {displayMins}:{displaySecs}
-                </Text>
-                <View style={styles.timerSubtextRow}>
-                  {totalSeconds === 0 && <Ionicons name="alarm-outline" size={12} color="rgba(255,255,255,0.6)" />}
-                  <Text style={styles.timerSubtext}>
-                    {totalSeconds === 0 ? "Time's up!" : running ? 'Running...' : 'Paused'}
-                  </Text>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.timerDisplay}>--:--</Text>
-                <Text style={styles.timerSubtext}>Set your timer</Text>
-              </>
-            )}
+        {/* Hosting Minutes Display */}
+        <View style={[styles.minutesRing, isLow && styles.minutesRingRed]}>
+          <View style={styles.minutesInner}>
+            <Text style={[styles.minutesDisplay, isLow && styles.minutesDisplayRed]}>
+              {formatMinutes(hostMinutes)}
+            </Text>
+            <View style={styles.minutesSubtextRow}>
+              <Text style={styles.minutesSubtext}>
+                {hostMinutes === 0 ? 'No minutes left' : 'minutes remaining'}
+              </Text>
+            </View>
           </View>
-          {/* Progress Ring Indicator */}
-          <View style={[styles.progressArc, { width: `${progress}%` }]} />
         </View>
 
-        {/* Presets */}
-        {!started && (
-          <>
-            <Text style={styles.sectionLabel}>Quick Presets</Text>
-            <View style={styles.presetRow}>
-              {presets.map(p => (
-                <TouchableOpacity
-                  key={p.label}
-                  style={styles.presetBtn}
-                onPress={() => {
-  setMinutes(p.mins.toString());
-  setSeconds(p.secs.toString().padStart(2, '0'));
-}} >
-                  <Text style={styles.presetBtnText}>{p.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>Custom Time</Text>
-            <View style={styles.inputRow}>
-              <View style={styles.timeInputWrap}>
-                <TextInput
-                  style={styles.timeInput}
-                  value={minutes}
-                  onChangeText={setMinutes}
-                  keyboardType="number-pad"
-                  maxLength={2}
-                  placeholder="00"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                />
-                <Text style={styles.timeInputLabel}>min</Text>
-              </View>
-              <Text style={styles.timeSeparator}>:</Text>
-              <View style={styles.timeInputWrap}>
-                <TextInput
-                  style={styles.timeInput}
-                  value={seconds}
-                  onChangeText={setSeconds}
-                  keyboardType="number-pad"
-                  maxLength={2}
-                  placeholder="00"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                />
-                <Text style={styles.timeInputLabel}>sec</Text>
-              </View>
-            </View>
-          </>
+        {/* Upgrade prompt for non-premium users (shown after 5 minute notification) */}
+        {!isPremium && showUpgrade && (
+          <View style={styles.upgradeCard}>
+            <Ionicons name="sparkles" size={18} color={colors.yellow} />
+            <Text style={styles.upgradeText}>Upgrade to Premium for extended session minutes</Text>
+          </View>
         )}
 
-        {/* Visibility note */}
+        {/* Info card */}
         <View style={styles.infoCard}>
-          <Ionicons name="eye-outline" size={17} color="rgba(255,255,255,0.6)" />
-          <Text style={styles.infoText}>Timer is visible to all attendees at the top of their screen. Last 30 seconds turns red.</Text>
-        </View>
-
-        {/* Controls */}
-        <View style={styles.controlRow}>
-          {!started ? (
-            <TouchableOpacity style={styles.startBtn} onPress={handleStart} activeOpacity={0.85}>
-              <Ionicons name="play" size={16} color={colors.white} />
-              <Text style={styles.startBtnText}>Start Timer</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={[styles.controlBtn, running ? styles.pauseBtn : styles.resumeBtn]}
-                onPress={() => setRunning(!running)}
-                activeOpacity={0.85}
-              >
-                <Ionicons name={running ? 'pause' : 'play'} size={15} color={colors.white} />
-                <Text style={styles.controlBtnText}>{running ? 'Pause' : 'Resume'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.controlBtn, styles.resetBtn]} onPress={handleReset} activeOpacity={0.85}>
-                <Ionicons name="refresh-outline" size={15} color={colors.white} />
-                <Text style={styles.controlBtnText}>Reset</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <Ionicons name="information-circle-outline" size={17} color="rgba(255,255,255,0.6)" />
+          <Text style={styles.infoText}>
+            {isPremium 
+              ? 'You have unlimited session minutes as a Premium user.'
+              : 'Free users get 30 minutes per month. Upgrade to Premium for unlimited sessions.'
+            }
+          </Text>
         </View>
 
         <TouchableOpacity style={styles.backToSessionBtn} onPress={() => navigation.goBack()} activeOpacity={0.75}>
@@ -201,34 +209,19 @@ const styles = StyleSheet.create({
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: colors.white, letterSpacing: -0.2 },
   content: { flex: 1, padding: 24, alignItems: 'center', gap: 20 },
-  timerRing: { width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative' },
-  timerRingRed: { borderColor: colors.red },
-  timerInner: { alignItems: 'center', zIndex: 2 },
-  timerDisplay: { fontSize: 54, fontWeight: '800', color: colors.white, fontVariant: ['tabular-nums'], letterSpacing: -1 },
-  timerDisplayRed: { color: colors.red },
-  timerSubtextRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
-  timerSubtext: { color: 'rgba(255,255,255,0.55)', fontSize: 13, fontWeight: '600' },
-  progressArc: { position: 'absolute', bottom: 0, left: 0, height: 6, backgroundColor: colors.primary },
-  sectionLabel: { fontSize: 13.5, fontWeight: '700', color: 'rgba(255,255,255,0.7)', alignSelf: 'flex-start', letterSpacing: -0.1 },
-  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-start', width: '100%' },
-  presetBtn: { backgroundColor: '#1E1E3F', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  presetBtnText: { color: colors.white, fontWeight: '600', fontSize: 13 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  timeInputWrap: { alignItems: 'center', gap: 4 },
-  timeInput: { width: 80, height: 64, backgroundColor: '#1E1E3F', borderRadius: 14, textAlign: 'center', fontSize: 28, fontWeight: '700', color: colors.white, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', outlineStyle: 'none' },
-  timeInputLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600' },
-  timeSeparator: { color: colors.white, fontSize: 36, fontWeight: '700', marginBottom: 20 },
+  minutesRing: { width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative' },
+  minutesRingRed: { borderColor: colors.red },
+  minutesInner: { alignItems: 'center', zIndex: 2 },
+  minutesDisplay: { fontSize: 72, fontWeight: '800', color: colors.white, fontVariant: ['tabular-nums'] },
+  minutesDisplayRed: { color: colors.red },
+  minutesSubtextRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
+  minutesSubtext: { color: 'rgba(255,255,255,0.55)', fontSize: 14, fontWeight: '600' },
+  upgradeCard: { flexDirection: 'row', gap: 10, backgroundColor: colors.yellow + '1A', borderRadius: 14, padding: 14, width: '100%', borderWidth: 1, borderColor: colors.yellow + '40', alignItems: 'center' },
+  upgradeText: { flex: 1, color: colors.yellow, fontSize: 14, fontWeight: '700' },
   infoCard: { flexDirection: 'row', gap: 11, backgroundColor: '#1E1E3F', borderRadius: 14, padding: 14, width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', alignItems: 'flex-start' },
   infoText: { flex: 1, color: 'rgba(255,255,255,0.55)', fontSize: 12, lineHeight: 18, fontWeight: '500' },
-  controlRow: { flexDirection: 'row', gap: 12, width: '100%' },
-  startBtn: { flex: 1, flexDirection: 'row', gap: 8, backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  startBtnText: { color: colors.white, fontSize: 15.5, fontWeight: '800' },
-  controlBtn: { flex: 1, flexDirection: 'row', gap: 7, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  pauseBtn: { backgroundColor: colors.yellow + 'AA' },
-  resumeBtn: { backgroundColor: colors.green + 'AA' },
-  resetBtn: { backgroundColor: '#1E1E3F', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  controlBtnText: { color: colors.white, fontSize: 14.5, fontWeight: '700' },
   backToSessionBtn: { paddingVertical: 10 },
   backToSessionRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backToSessionText: { color: 'rgba(255,255,255,0.5)', fontSize: 13.5, fontWeight: '500' },
+  loadingText: { color: 'rgba(255,255,255,0.5)', fontSize: 16 },
 });

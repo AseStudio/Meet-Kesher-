@@ -70,13 +70,24 @@ export default function CreateSession({ navigation }) {
   const [error, setError] = useState('');
   const [sessionCode] = useState(generateCode());
   const [plan, setPlan] = useState('free');
+  const [hostMinutes, setHostMinutes] = useState(null);
+  const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
-      setPlan(data?.plan || 'free');
+      const { data: profile } = await supabase.from('profiles').select('plan, is_premium').eq('id', user.id).maybeSingle();
+      setPlan(profile?.plan || 'free');
+      setIsPremium(!!profile?.is_premium);
+      
+      // Fetch hosting minutes balance
+      const { data: usageRow } = await supabase.rpc('get_my_usage');
+      if (usageRow && usageRow.host_minutes_balance !== null) {
+        setHostMinutes(Math.max(0, usageRow.host_minutes_balance));
+      } else {
+        setHostMinutes(0);
+      }
     })();
   }, []);
 
@@ -121,6 +132,15 @@ export default function CreateSession({ navigation }) {
   setError('');
   if (!title.trim()) return setError('Please enter a session title.');
   if (!password.trim()) return setError('Please set a session password.');
+  
+  // Check if hosting minutes are exhausted (<= 1 means less than 2)
+  if (hostMinutes !== null && hostMinutes <= 1) {
+    const message = isPremium 
+      ? 'Cannot create session, hosting minutes exhausted'
+      : 'Cannot create session, hosting minutes exhausted, upgrade to Premium for higher limits';
+    showAlert('Insufficient Minutes', message);
+    return;
+  }
 
   setLoading(true);
   try {
@@ -301,21 +321,6 @@ export default function CreateSession({ navigation }) {
 
         <View style={styles.buttonRow}>
           <TouchableOpacity
-            style={[styles.scheduleButton, loading && styles.btnDisabled]}
-            onPress={() => createSession()}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            {loading ? (
-              <ActivityIndicator color={palette.primary} />
-            ) : (
-              <>
-                <Ionicons name="calendar-outline" size={16} color={palette.primary} />
-                <Text style={styles.scheduleButtonText}>Schedule</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.launchButton, loading && styles.btnDisabled]}
             onPress={() => createSession()}
             disabled={loading}
@@ -399,10 +404,8 @@ const styles = StyleSheet.create({
   settingIconWrap: { width: 30, height: 30, borderRadius: 9, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
   settingLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: palette.ink },
 
-  buttonRow: { flexDirection: 'row', gap: 12, marginTop: 26 },
-  scheduleButton: { flex: 1, flexDirection: 'row', gap: 7, backgroundColor: palette.surface, paddingVertical: 15, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: palette.primary },
-  scheduleButtonText: { color: palette.primary, fontSize: 14.5, fontWeight: '800' },
-  launchButton: { flex: 1, flexDirection: 'row', gap: 7, backgroundColor: palette.primary, paddingVertical: 15, borderRadius: 16, alignItems: 'center', justifyContent: 'center', ...launchShadow },
+  buttonRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 26 },
+  launchButton: { flexDirection: 'row', gap: 7, backgroundColor: palette.primary, paddingVertical: 15, borderRadius: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, ...launchShadow },
   launchButtonText: { color: palette.surface, fontSize: 14.5, fontWeight: '800' },
   btnDisabled: { opacity: 0.6 },
 });

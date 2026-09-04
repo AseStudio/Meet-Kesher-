@@ -1201,7 +1201,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
     { icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
     { icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },
-    { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen') },
+    { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen', { session }) },
     { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
     { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
