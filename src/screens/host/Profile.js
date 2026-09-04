@@ -101,6 +101,10 @@ export default function Profile({ navigation }) {
         neutralText: colors.grey,
       };
 
+  // Compute cardShadow and styles based on current theme
+  const cardShadow = getCardShadow(darkMode);
+  const styles = getStyles(themePalette, darkMode);
+
   useEffect(() => {
     loadProfile();
     requestImagePermissions();
@@ -489,14 +493,17 @@ export default function Profile({ navigation }) {
   );
 }
 
-const cardShadow = Platform.select({
-  ios: { shadowColor: darkMode ? '#000' : '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
+// Helper function to create cardShadow based on darkMode
+const getCardShadow = (isDark) => Platform.select({
+  ios: { shadowColor: isDark ? '#000' : '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
   android: { elevation: 3 },
-  default: { boxShadow: darkMode ? '0 6px 18px rgba(0,0,0,0.18)' : '0 6px 18px rgba(42,26,107,0.08)' },
+  default: { boxShadow: isDark ? '0 6px 18px rgba(0,0,0,0.18)' : '0 6px 18px rgba(42,26,107,0.08)' },
 });
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: themePalette.canvas },
+// Helper function to create styles based on themePalette and darkMode
+const getStyles = (themePal, isDark) => StyleSheet.create({
+
+  container: { flex: 1, backgroundColor: themePal.canvas },
   scroll: { paddingBottom: 50 },
 
   // ── Header ──
@@ -516,7 +523,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 13,
-    backgroundColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.18)',
+    backgroundColor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -527,33 +534,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.85)',
+    borderColor: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.85)',
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
-  avatarText: { color: themePalette.surface, fontSize: 28, fontWeight: '800' },
+  avatarText: { color: themePal.surface, fontSize: 28, fontWeight: '800' },
   avatarOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 21, fontWeight: '800', color: themePalette.surface, letterSpacing: -0.3, marginTop: 2 },
-  email: { fontSize: 12.5, color: darkMode ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.5)', fontWeight: '500' },
+  name: { fontSize: 21, fontWeight: '800', color: themePal.surface, letterSpacing: -0.3, marginTop: 2 },
+  email: { fontSize: 12.5, color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.5)', fontWeight: '500' },
   usernameDisplayRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  usernameDisplayText: { fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.5)', fontWeight: '600' },
-  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: darkMode ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  usernameAt: { fontSize: 12.5, color: darkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.4)', fontWeight: '700' },
-  usernameEditInput: { fontSize: 12.5, color: themePalette.ink, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
-  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: darkMode ? 'rgba(255,255,255,0.9)' : themePalette.surface, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
-  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: darkMode ? 'rgba(255,255,255,0.2)' : themePalette.line, alignItems: 'center', justifyContent: 'center' },
-  usernameErrorText: { fontSize: 10.5, color: themePalette.danger, fontWeight: '600', marginTop: 4 },
+  usernameDisplayText: { fontSize: 12, color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.5)', fontWeight: '600' },
+  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  usernameAt: { fontSize: 12.5, color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.4)', fontWeight: '700' },
+  usernameEditInput: { fontSize: 12.5, color: themePal.ink, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
+  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: isDark ? 'rgba(255,255,255,0.9)' : themePal.surface, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
+  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : themePal.line, alignItems: 'center', justifyContent: 'center' },
+  usernameErrorText: { fontSize: 10.5, color: themePal.danger, fontWeight: '600', marginTop: 4 },
   roleBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)',
+    backgroundColor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)',
     paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20, marginTop: 2,
   },
-  roleBadgeText: { color: themePalette.surface, fontWeight: '700', fontSize: 12.5 },
+  roleBadgeText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Stats ──
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: themePalette.surface,
+    backgroundColor: themePal.surface,
     marginHorizontal: 20,
     marginTop: -22,
     borderRadius: 18,
@@ -561,52 +568,52 @@ const styles = StyleSheet.create({
     ...cardShadow,
   },
   statCard: { flex: 1, alignItems: 'center', gap: 4 },
-  statDivider: { width: 1, backgroundColor: themePalette.line, marginVertical: 4 },
-  statValue: { fontSize: 26, fontWeight: '800', color: themePalette.primary, letterSpacing: -0.5 },
-  statValueSmall: { fontSize: 15, fontWeight: '800', color: themePalette.primary, marginTop: 5 },
-  statLabel: { fontSize: 10.5, color: themePalette.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
+  statDivider: { width: 1, backgroundColor: themePal.line, marginVertical: 4 },
+  statValue: { fontSize: 26, fontWeight: '800', color: themePal.primary, letterSpacing: -0.5 },
+  statValueSmall: { fontSize: 15, fontWeight: '800', color: themePal.primary, marginTop: 5 },
+  statLabel: { fontSize: 10.5, color: themePal.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
 
   // ── Subscription ──
   subscriptionCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, padding: 16, ...cardShadow,
   },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePalette.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  subIconWrapPremium: { backgroundColor: themePalette.premiumSoft },
+  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  subIconWrapPremium: { backgroundColor: themePal.premiumSoft },
   subTextWrap: { flex: 1 },
-  subPlan: { fontSize: 14.5, fontWeight: '700', color: themePalette.ink },
-  subDesc: { fontSize: 11.5, color: themePalette.inkMuted, marginTop: 2, fontWeight: '500' },
+  subPlan: { fontSize: 14.5, fontWeight: '700', color: themePal.ink },
+  subDesc: { fontSize: 11.5, color: themePal.inkMuted, marginTop: 2, fontWeight: '500' },
 
   // ── Usage ──
   usageCard: {
-    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 10,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 10,
     borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
   },
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  usageLabel: { flex: 1, fontSize: 12.5, color: themePalette.inkMuted, fontWeight: '600' },
-  usageValue: { fontSize: 14, color: themePalette.ink, fontWeight: '800' },
-  usageNote: { fontSize: 11, color: themePalette.neutralText, fontWeight: '500', marginTop: 2 },
-  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePalette.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
-  upgradeBtnText: { color: themePalette.surface, fontWeight: '700', fontSize: 12.5 },
+  usageLabel: { flex: 1, fontSize: 12.5, color: themePal.inkMuted, fontWeight: '600' },
+  usageValue: { fontSize: 14, color: themePal.ink, fontWeight: '800' },
+  usageNote: { fontSize: 11, color: themePal.neutralText, fontWeight: '500', marginTop: 2 },
+  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePal.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
+  upgradeBtnText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Settings ──
   settingsCard: {
-    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, overflow: 'hidden', ...cardShadow,
   },
   settingRow: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
-  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: themePalette.line },
-  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: themePalette.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  settingLabel: { flex: 1, fontSize: 14, color: themePalette.ink, fontWeight: '600' },
+  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: themePal.line },
+  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  settingLabel: { flex: 1, fontSize: 14, color: themePal.ink, fontWeight: '600' },
 
   // ── Logout / version ──
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginHorizontal: 20, marginTop: 16,
-    backgroundColor: themePalette.dangerSoft, paddingVertical: 15, borderRadius: 16,
+    backgroundColor: themePal.dangerSoft, paddingVertical: 15, borderRadius: 16,
   },
-  logoutText: { color: themePalette.danger, fontSize: 15, fontWeight: '800' },
-  version: { textAlign: 'center', color: themePalette.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
+  logoutText: { color: themePal.danger, fontSize: 15, fontWeight: '800' },
+  version: { textAlign: 'center', color: themePal.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
 });
