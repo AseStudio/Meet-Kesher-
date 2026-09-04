@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions, Platform,
+  FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-import FeedAdUnit from '../../components/FeedAdUnit';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -245,7 +244,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
           .order('created_at', { ascending: false }),
         supabase
           .from('feed_posts')
-          .select('*, channels(name), profiles(full_name), feed_post_media(url, position)')
+          .select('*, channels(name), profiles(full_name), feed_post_media(id, url, position)')
           .eq('status', 'published')
           .order('created_at', { ascending: false })
           .limit(50),
@@ -302,10 +301,10 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   }, []);
 
   // Covers both the initial mount AND every time this tab regains focus
-  // (e.g. returning from PostCommentsScreen after adding a comment).
-  // Call load() immediately on mount to avoid relying solely on focus event.
+  // (e.g. returning from PostCommentsScreen after adding a comment) —
+  // React Navigation's 'focus' event fires on first mount too, so a
+  // separate mount-only effect calling load() would just double-fetch.
   useEffect(() => {
-    load(false);
     const unsub = navigation.addListener('focus', () => load(false));
     return unsub;
   }, [navigation, load]);
@@ -344,10 +343,23 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       ...prev,
       [postId]: Math.max(0, (prev[postId] || 0) + (already ? -1 : 1)),
     }));
-    if (already) {
-      await supabase.from('feed_post_reactions').delete().eq('post_id', postId).eq('user_id', userId);
-    } else {
-      await supabase.from('feed_post_reactions').insert({ post_id: postId, user_id: userId, reaction: 'like' });
+    const { error } = already
+      ? await supabase.from('feed_post_reactions').delete().eq('post_id', postId).eq('user_id', userId)
+      : await supabase.from('feed_post_reactions').insert({ post_id: postId, user_id: userId, reaction: 'like' });
+
+    if (error) {
+      // Roll back the optimistic update — same pattern as
+      // deletePost/decideDraft/reportPost elsewhere in this file.
+      setMyReactions((prev) => {
+        const next = new Set(prev);
+        already ? next.add(postId) : next.delete(postId);
+        return next;
+      });
+      setReactionCounts((prev) => ({
+        ...prev,
+        [postId]: Math.max(0, (prev[postId] || 0) + (already ? 1 : -1)),
+      }));
+      showAlert('Could not update', error.message);
     }
   };
 
@@ -467,24 +479,6 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
                     <Text style={styles.upgradeBtnText}>Go Premium</Text>
                     <Ionicons name="sparkles" size={13} color={palette.surface} />
                   </TouchableOpacity>
-                </View>
-              );
-            }
-
-            if (item._kind === 'ad_slot' && Platform.OS === 'web') {
-              // Real AdSense here, on web only — no mobile-app SDK exists
-              // for AdSense at all (that's AdMob, a separate product not
-              // yet wired in), so native keeps the rotating placeholder
-              // text below instead of this branch.
-              return (
-                <View style={styles.postCard}>
-                  <View style={styles.postHeader}>
-                    <View style={[styles.postIconWrap, { backgroundColor: meta.iconBg }]}>
-                      <Ionicons name={meta.icon} size={16} color={meta.iconColor} />
-                    </View>
-                    <Text style={styles.postKind}>{meta.label}</Text>
-                  </View>
-                  <FeedAdUnit />
                 </View>
               );
             }
