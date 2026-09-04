@@ -273,9 +273,36 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
     }
   }, []);
 
+  // hasLoadedOnceRef: only the very first load (or an explicit
+  // pull-to-refresh) should show the blocking skeleton and fully
+  // replace the list. Every OTHER page-1 reload — triggered by
+  // refocusing this tab (which fires on every single back-navigation
+  // into it, not just app launch) or by the realtime "new post"
+  // listener — used to unconditionally wipe the feed back down to a
+  // fresh 20-item page 1 and flash the skeleton again, discarding
+  // whatever pages the user had already scrolled into. That reset,
+  // repeating on ordinary navigation, is what made this feel like it
+  // never finished loading.
+  //
+  // loadingRef: focus regaining and a realtime insert can fire within
+  // milliseconds of each other with nothing to stop both from calling
+  // load() at once — this serializes them instead of letting duplicate
+  // getSession()/query round trips stack up concurrently.
+  const hasLoadedOnceRef = useRef(false);
+  const loadingRef = useRef(false);
+
   const load = useCallback(async (isRefresh, pageNum = 1) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+
+    const isFirstLoad = pageNum === 1 && !hasLoadedOnceRef.current;
+    const isSilentPageOneReload = pageNum === 1 && !isRefresh && hasLoadedOnceRef.current;
+
     if (pageNum === 1) {
-      isRefresh ? setRefreshing(true) : setLoading(true);
+      if (isRefresh) setRefreshing(true);
+      else if (isFirstLoad) setLoading(true);
+      // else: silent background reload — no visible loading state,
+      // existing list stays on screen exactly as the user left it.
     } else {
       setLoadingMore(true);
     }
@@ -344,9 +371,19 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       const ranked = rankPosts(sorted, {}, {});
 
       if (pageNum === 1) {
-        setPosts(ranked);
-        setPage(1);
-        setHasMore(sorted.length >= PAGE_SIZE);
+        if (isSilentPageOneReload) {
+          // Merge instead of replace: fold in anything genuinely new at
+          // the top, but leave already-loaded pages 2+ and the user's
+          // scroll position completely alone.
+          setPosts((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const fresh = ranked.filter((p) => !existingIds.has(p.id));
+            return fresh.length > 0 ? [...fresh, ...prev] : prev;
+          });
+        } else {
+          setPosts(ranked);
+          setHasMore(sorted.length >= PAGE_SIZE);
+        }
       } else {
         // Subsequent pages: simply append new posts at the end (already
         // sorted by created_at). We don't re-rank to avoid reshuffling
@@ -356,6 +393,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       }
 
       setPage(pageNum);
+      hasLoadedOnceRef.current = true;
 
       // Fire-and-forget — deliberately not awaited. Posts are already
       // set above; clearing loading/refreshing happens in `finally`
@@ -370,6 +408,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       } else {
         setLoadingMore(false);
       }
+      loadingRef.current = false;
     }
   }, [loadCounts]);
 
