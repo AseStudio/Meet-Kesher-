@@ -1237,7 +1237,6 @@ function getProfileKey(uplink = 0, downlink = 0) {
   };
 
   // Adaptive dimensions for small screens
-  const attendeeStripWidth = isSmall ? Math.min(scale(80), width * 0.22) : scale(104);
   const galleryCellWidth = isSmall ? Math.min(scale(160), width * 0.42) : scale(190);
   const galleryCellHeight = isSmall ? Math.min(scale(120), height * 0.22) : scale(140);
   const pipWidth = isSmall ? Math.min(scale(76), width * 0.18) : scale(92);
