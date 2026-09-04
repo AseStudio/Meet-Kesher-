@@ -302,10 +302,10 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   }, []);
 
   // Covers both the initial mount AND every time this tab regains focus
-  // (e.g. returning from PostCommentsScreen after adding a comment) —
-  // React Navigation's 'focus' event fires on first mount too, so a
-  // separate mount-only effect calling load() would just double-fetch.
+  // (e.g. returning from PostCommentsScreen after adding a comment).
+  // Call load() immediately on mount to avoid relying solely on focus event.
   useEffect(() => {
+    load(false);
     const unsub = navigation.addListener('focus', () => load(false));
     return unsub;
   }, [navigation, load]);

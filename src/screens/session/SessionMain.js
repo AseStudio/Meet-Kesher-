@@ -1153,7 +1153,17 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // other non-called attendee — until they tap Interrupt.
   const hostCanDraw = Object.keys(boardEditors).length === 0 || hostInterrupting;
   const callInProgress = Object.keys(boardEditors).length > 0;
-  const pendingCallName = pendingCallUid != null ? (uidToUser[pendingCallUid]?.name || 'attendee') : null;
+
+  // Helper functions to get attendee display name and initials
+  const getAttendeeName = (uid) => {
+    const userInfo = uidToUser[uid];
+    return userInfo?.name || `User ${remoteUsers.findIndex(u => u.uid === uid) + 1}`;
+  };
+
+  const getAttendeeInitials = (uid) => {
+    const name = getAttendeeName(uid);
+    return name.slice(0, 2).toUpperCase();
+  };
 
   // Snapshot roster for ChatPanel, built from identities we already know
   // about (ourself + uidToUser, populated from 'user-identity'
@@ -1309,9 +1319,9 @@ function getProfileKey(uplink = 0, downlink = 0) {
             {/* Waiting for an invited attendee to respond — board is open
                 (host opened it directly or a previous call is active) but
                 this particular invite hasn't resolved yet. */}
-            {pendingCallName && (
+            {pendingCallUid && (
               <View style={styles.pendingCallBar}>
-                <Text style={styles.pendingCallText}>Waiting for {pendingCallName} to accept…</Text>
+                <Text style={styles.pendingCallText}>Waiting for {getAttendeeName(pendingCallUid)} to accept…</Text>
               </View>
             )}
 
@@ -1345,8 +1355,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   <VideoTile
                     track={mainRemoteUser.videoTrack}
                     cameraOff={!!attendeeMediaState[mainRemoteUser.uid]?.cameraOff}
-                    initials={`U${remoteUsers.indexOf(mainRemoteUser) + 1}`}
-                    label={`User ${remoteUsers.indexOf(mainRemoteUser) + 1}`}
+                    initials={getAttendeeInitials(mainRemoteUser.uid)}
+                    label={getAttendeeName(mainRemoteUser.uid)}
                     style={{ flex: 1 }}
                     initialsSize={13}
                   />
@@ -1356,8 +1366,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 <VideoTile
                   track={localVideoTrack}
                   cameraOff={cameraOff}
-                  initials="You"
-                  label="You"
+                  initials={hostUser?.name ? hostUser.name.slice(0, 2).toUpperCase() : "YH"}
+                  label={hostUser?.name ? hostUser.name : "You"}
                   style={{ flex: 1 }}
                   initialsSize={13}
                   mirror={true}
@@ -1371,7 +1381,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 {Object.entries(boardEditors).map(([uid, info]) => (
                   <View key={uid} style={styles.boardEditorChip}>
                     <Ionicons name="create" size={11} color={colors.white} />
-                    <Text style={styles.boardEditorChipText} numberOfLines={1}>{info.name}</Text>
+                    <Text style={styles.boardEditorChipText} numberOfLines={1}>{info.name || getAttendeeName(Number(uid))}</Text>
                     <TouchableOpacity onPress={() => revokeFromBoard(uid)} style={styles.boardEditorRemoveBtn}>
                       <Text style={styles.boardEditorRemoveText}>Uncall</Text>
                     </TouchableOpacity>
@@ -1421,30 +1431,35 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 </View>
                 {/* Remote attendees — Gallery view is the primary, full
                     display for every remote user while it's open. */}
-                {remoteUsers.map((user, i) => (
-                  <View key={user.uid} style={styles.galleryCell}>
-                    <VideoTile
-                      track={user.videoTrack}
-                      cameraOff={!!attendeeMediaState[user.uid]?.cameraOff}
-                      initials={`U${i + 1}`}
-                      label={`User ${i + 1}`}
-                      style={{ flex: 1 }}
-                      initialsSize={22}
-                    />
-                    {coHosts[user.uid] && (
-                      <View style={styles.galleryCoHostBadge}>
-                        <Ionicons name="star" size={10} color="#3A2900" />
-                        <Text style={styles.galleryCoHostBadgeText}>Co-host</Text>
-                      </View>
-                    )}
-                    <TouchableOpacity style={styles.galleryCellDots} onPress={() => setShowDropdown(user.uid)}>
-                      <Text style={styles.galleryCellDotsText}>⋮</Text>
-                    </TouchableOpacity>
-                    {activeSpeakerUid === user.uid && (
-                      <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />
-                    )}
-                  </View>
-                ))}
+                {remoteUsers.map((user, i) => {
+                  const userInfo = uidToUser[user.uid];
+                  const displayName = userInfo?.name || `User ${i + 1}`;
+                  const displayInitials = displayName.slice(0, 2).toUpperCase();
+                  return (
+                    <View key={user.uid} style={styles.galleryCell}>
+                      <VideoTile
+                        track={user.videoTrack}
+                        cameraOff={!!attendeeMediaState[user.uid]?.cameraOff}
+                        initials={displayInitials}
+                        label={displayName}
+                        style={{ flex: 1 }}
+                        initialsSize={22}
+                      />
+                      {coHosts[user.uid] && (
+                        <View style={styles.galleryCoHostBadge}>
+                          <Ionicons name="star" size={10} color="#3A2900" />
+                          <Text style={styles.galleryCoHostBadgeText}>Co-host</Text>
+                        </View>
+                      )}
+                      <TouchableOpacity style={styles.galleryCellDots} onPress={() => setShowDropdown(user.uid)}>
+                        <Text style={styles.galleryCellDotsText}>⋮</Text>
+                      </TouchableOpacity>
+                      {activeSpeakerUid === user.uid && (
+                        <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />
+                      )}
+                    </View>
+                  );
+                })}
               </ScrollView>
 
             ) : (
@@ -1456,8 +1471,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     <VideoTile
                       track={localVideoTrack}
                       cameraOff={cameraOff}
-                      initials="You"
-                      label="You (Host)"
+                      initials={hostUser?.name ? hostUser.name.slice(0, 2).toUpperCase() : "YH"}
+                      label={hostUser?.name ? `${hostUser.name} (Host)` : "You (Host)"}
                       style={{ flex: 1 }}
                       initialsSize={40}
                       mirror={true}
@@ -1472,14 +1487,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   )
                 ) : (
                   // Attendee is the sole speaker — show them on main
-                  <VideoTile
-                    track={mainRemoteUser?.videoTrack}
-                    cameraOff={!!attendeeMediaState[mainRemoteUser?.uid]?.cameraOff}
-                    initials={`U${remoteUsers.indexOf(mainRemoteUser) + 1}`}
-                    label={`User ${remoteUsers.indexOf(mainRemoteUser) + 1}`}
-                    style={{ flex: 1 }}
-                    initialsSize={40}
-                  />
+                  mainRemoteUser && (
+                    <VideoTile
+                      track={mainRemoteUser?.videoTrack}
+                      cameraOff={!!attendeeMediaState[mainRemoteUser?.uid]?.cameraOff}
+                      initials={getAttendeeInitials(mainRemoteUser.uid)}
+                      label={getAttendeeName(mainRemoteUser.uid)}
+                      style={{ flex: 1 }}
+                      initialsSize={40}
+                    />
+                  )
                 )}
 
                 {/* PiP — host's self-view when NOT on main */}
@@ -1488,8 +1505,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     <VideoTile
                       track={localVideoTrack}
                       cameraOff={cameraOff}
-                      initials="You"
-                      label="You"
+                      initials={hostUser?.name ? hostUser.name.slice(0, 2).toUpperCase() : "YH"}
+                      label={hostUser?.name ? hostUser.name : "You"}
                       style={{ flex: 1 }}
                       initialsSize={14}
                       mirror={true}
@@ -1553,7 +1570,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
           <View style={styles.boardPickerPanel}>
             <Text style={styles.boardPickerTitle}>
               {boardPickerTargetUid
-                ? `Choose a Board to Call ${uidToUser[boardPickerTargetUid]?.name || 'them'} To`
+                ? `Choose a Board to Call ${getAttendeeName(boardPickerTargetUid)} To`
                 : 'Choose a Board'}
             </Text>
             <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
@@ -1606,15 +1623,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
               <Text style={styles.coHostEmptyText}>No attendees in the session yet.</Text>
             ) : (
               <ScrollView style={styles.coHostList}>
-                {remoteUsers.map((user, i) => {
+                {remoteUsers.map((user) => {
                   const info = uidToUser[user.uid];
                   const isCo = !!coHosts[user.uid];
-                  const displayName = info?.name || `User ${i + 1}`;
+                  const displayName = info?.name || getAttendeeName(user.uid);
+                  const displayInitials = displayName.slice(0, 2).toUpperCase();
                   return (
                     <View key={user.uid} style={styles.coHostRow}>
                       <View style={styles.coHostRowLeft}>
                         <View style={styles.coHostAvatar}>
-                          <Text style={styles.coHostAvatarText}>{displayName.slice(0, 2).toUpperCase()}</Text>
+                          <Text style={styles.coHostAvatarText}>{displayInitials}</Text>
                         </View>
                         <Text style={styles.coHostRowName} numberOfLines={1}>{displayName}</Text>
                       </View>
@@ -1644,7 +1662,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowDropdown(null)}>
           <View style={styles.dropdownModal}>
             <Text style={styles.dropdownHeader}>
-              User {remoteUsers.findIndex(u => u.uid === showDropdown) + 1}
+              {showDropdown && getAttendeeName(showDropdown)}
             </Text>
             {[
               { icon: 'mic-off-outline', label: 'Mute', color: colors.white, action: () => requestMuteAttendee(showDropdown) },

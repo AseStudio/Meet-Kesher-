@@ -791,6 +791,23 @@ export default function AttendeeSession({ navigation, route }) {
   // interrupting. This is what actually gets passed to the board.
   const effectiveBoardCanEdit = canEdit && !hostInterrupting;
 
+  // Helper functions to get attendee display name and initials
+  const getAttendeeName = (uid) => {
+    // First check co-hosts for this uid
+    if (coHostUids[uid]) return coHostUids[uid].name;
+    // Then check otherUsers
+    const userInfo = Object.values(otherUsers).find(u => u.userId?.toString() === uid?.toString());
+    if (userInfo) return userInfo.name;
+    // Fallback based on position in remoteUsers
+    const index = remoteUsers.findIndex(u => u.uid === uid);
+    return index === 0 ? 'Host' : `User ${index}`;
+  };
+
+  const getAttendeeInitials = (uid) => {
+    const name = getAttendeeName(uid);
+    return name.slice(0, 2).toUpperCase();
+  };
+
   const openChat = () => {
     setUnreadCount(0);
     chatOpenRef.current = true;
@@ -940,15 +957,15 @@ export default function AttendeeSession({ navigation, route }) {
                     <VideoTile
                       track={remoteUsers[0]?.videoTrack}
                       cameraOff={!!remoteMediaState[remoteUsers[0]?.uid]?.cameraOff}
-                      initials="Host"
-                      label="Host"
+                      initials={getAttendeeInitials(remoteUsers[0]?.uid)}
+                      label={getAttendeeName(remoteUsers[0]?.uid)}
                       style={{ flex: 1 }}
                       initialsSize={scale(13)}
                     />
                   </View>
                 )}
                 <View style={styles.stackPip}>
-                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
+                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials={currentUserRef.current?.name ? currentUserRef.current.name.slice(0, 2).toUpperCase() : "YU"} label={currentUserRef.current?.name || "You"} style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
                 </View>
               </View>
 
@@ -977,16 +994,16 @@ export default function AttendeeSession({ navigation, route }) {
               }]}
             >
               <View style={styles.galleryCell}>
-                <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label={iAmSpeaking ? 'You' : 'You'} style={{ flex: 1 }} initialsSize={scale(20)} mirror={true} />
+                <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials={currentUserRef.current?.name ? currentUserRef.current.name.slice(0, 2).toUpperCase() : "YU"} label={currentUserRef.current?.name || "You"} style={{ flex: 1 }} initialsSize={scale(20)} mirror={true} />
                 {iAmSpeaking && <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />}
               </View>
-              {remoteUsers.map((user, i) => (
+              {remoteUsers.map((user) => (
                 <View key={user.uid} style={styles.galleryCell}>
                   <VideoTile
                     track={user.videoTrack}
                     cameraOff={!!remoteMediaState[user.uid]?.cameraOff}
-                    initials={i === 0 ? 'H' : `U${i}`}
-                    label={i === 0 ? 'Host' : `User ${i}`}
+                    initials={getAttendeeInitials(user.uid)}
+                    label={getAttendeeName(user.uid)}
                     style={{ flex: 1 }}
                     initialsSize={scale(20)}
                   />
@@ -996,7 +1013,7 @@ export default function AttendeeSession({ navigation, route }) {
                       <Text style={styles.galleryCoHostBadgeText}>Co-host</Text>
                     </View>
                   )}
-                  {isCoHost && i !== 0 && (
+                  {isCoHost && remoteUsers.indexOf(user) !== 0 && (
                     <TouchableOpacity style={styles.galleryCellDots} onPress={() => setShowModDropdown(user.uid)}>
                       <Ionicons name="ellipsis-vertical" size={scale(14)} color={colors.white} />
                     </TouchableOpacity>
@@ -1014,8 +1031,8 @@ export default function AttendeeSession({ navigation, route }) {
                 <VideoTile
                   track={localVideoTrack}
                   cameraOff={cameraOff}
-                  initials="You"
-                  label="You (Speaking)"
+                  initials={currentUserRef.current?.name ? currentUserRef.current.name.slice(0, 2).toUpperCase() : "YU"}
+                  label={`${currentUserRef.current?.name || "You"} (Speaking)`}
                   style={{ flex: 1 }}
                   initialsSize={scale(40)}
                   mirror={true}
@@ -1025,8 +1042,8 @@ export default function AttendeeSession({ navigation, route }) {
                 <VideoTile
                   track={mainRemoteUser.videoTrack}
                   cameraOff={!!remoteMediaState[mainRemoteUser.uid]?.cameraOff}
-                  initials={remoteUsers.indexOf(mainRemoteUser) === 0 ? 'Host' : `U${remoteUsers.indexOf(mainRemoteUser)}`}
-                  label={remoteUsers.indexOf(mainRemoteUser) === 0 ? 'Host' : `User ${remoteUsers.indexOf(mainRemoteUser)}`}
+                  initials={getAttendeeInitials(mainRemoteUser.uid)}
+                  label={getAttendeeName(mainRemoteUser.uid)}
                   style={{ flex: 1 }}
                   initialsSize={scale(40)}
                 />
@@ -1045,7 +1062,7 @@ export default function AttendeeSession({ navigation, route }) {
                   height: pipContainerHeight,
                   right: isSmall ? scale(50) : scale(74)
                 }]}>
-                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials="You" label="You" style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
+                  <VideoTile track={localVideoTrack} cameraOff={cameraOff} initials={currentUserRef.current?.name ? currentUserRef.current.name.slice(0, 2).toUpperCase() : "YU"} label={currentUserRef.current?.name || "You"} style={{ flex: 1 }} initialsSize={scale(13)} mirror={true} />
                 </View>
               )}
             </>

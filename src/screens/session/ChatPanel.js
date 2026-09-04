@@ -97,8 +97,8 @@ export default function ChatPanel({ navigation, route }) {
   const { session, currentUser, isHost, prefilledRecipient, roster: rosterSnapshot } = route.params || {};
   const myId = currentUser?.id ?? null;
   const myName = currentUser?.name || (isHost ? 'Host' : 'Attendee');
-  // Point-in-time snapshot — see the file header for why this isn't live.
-  const roster = rosterSnapshot || {};
+  // Live roster updated via realtime subscription to roster channel
+  const [roster, setRoster] = useState(rosterSnapshot || {});
 
   const [messages, setMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -157,7 +157,39 @@ export default function ChatPanel({ navigation, route }) {
     ch.subscribe();
     channelRef.current = ch;
 
-    return () => supabase.removeChannel(ch);
+    // ─── Roster subscription — separate channel for live roster updates ───
+    // The parent session screens should broadcast 'user-joined' / 'user-left' / 'roster-sync'
+    // events to this channel whenever the participant list changes.
+    const rosterCh = supabase.channel(`session-roster-${session.id}`);
+
+    rosterCh.on('broadcast', { event: 'roster-sync' }, ({ payload }) => {
+      // Full roster replacement (e.g., on initial connect or reconnect)
+      setRoster(payload.roster || {});
+    });
+
+    rosterCh.on('broadcast', { event: 'user-joined' }, ({ payload }) => {
+      // Add new user to roster
+      setRoster((prev) => ({
+        ...prev,
+        [payload.userId]: { name: payload.name, isHost: payload.isHost || false },
+      }));
+    });
+
+    rosterCh.on('broadcast', { event: 'user-left' }, ({ payload }) => {
+      // Remove user from roster
+      setRoster((prev) => {
+        const next = { ...prev };
+        delete next[payload.userId];
+        return next;
+      });
+    });
+
+    rosterCh.subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+      supabase.removeChannel(rosterCh);
+    };
   }, [session?.id, myId]);
 
   // ─── Auto-scroll to newest message ───

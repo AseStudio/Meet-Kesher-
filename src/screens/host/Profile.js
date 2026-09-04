@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput, Image, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
@@ -53,10 +54,104 @@ export default function Profile({ navigation }) {
   const [usernameInput, setUsernameInput] = useState('');
   const [savingUsername, setSavingUsername] = useState(false);
   const [usernameError, setUsernameError] = useState('');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  // Apply theme to palette
+  const themePalette = darkMode
+    ? {
+        primary: colors.primary,
+        primaryBright: colors.primaryLight,
+        primaryDeep: colors.primaryDark,
+        primarySoft: colors.background,
+        ink: colors.white,
+        inkMuted: 'rgba(255,255,255,0.6)',
+        surface: '#1A1A2E',
+        canvas: '#0A0A1A',
+        line: '#2D2D44',
+        success: colors.green,
+        successSoft: '#2E8B57',
+        danger: colors.red,
+        dangerSoft: '#FF6B6B',
+        amber: colors.yellow,
+        amberSoft: '#FFA500',
+        premium: '#7C3AED',
+        premiumSoft: '#4C1D95',
+        neutralSoft: '#3A3A5A',
+        neutralText: 'rgba(255,255,255,0.5)',
+      }
+    : {
+        primary: colors.primary,
+        primaryBright: colors.primaryLight,
+        primaryDeep: colors.primaryDark,
+        primarySoft: colors.background,
+        ink: colors.text,
+        inkMuted: colors.textLight,
+        surface: colors.white,
+        canvas: colors.background,
+        line: colors.greyLight,
+        success: colors.green,
+        successSoft: '#E7FBF0',
+        danger: colors.red,
+        dangerSoft: '#FFE9E9',
+        amber: colors.yellow,
+        amberSoft: '#FFF3DE',
+        premium: '#7C3AED',
+        premiumSoft: '#F1E8FE',
+        neutralSoft: colors.greyLight,
+        neutralText: colors.grey,
+      };
 
   useEffect(() => {
     loadProfile();
+    requestImagePermissions();
   }, []);
+
+  // Realtime subscription for session count updates
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const channel = supabase
+      .channel(`profile-session-count-${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'session_attendees',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        () => {
+          refreshSessionCount();
+        }
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [profile?.id]);
+
+  // Request image picker permissions
+  const requestImagePermissions = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      console.warn('Image picker permission not granted');
+    }
+  };
+
+  const refreshSessionCount = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { count } = await supabase
+        .from('session_attendees')
+        .select('*', { count: 'exact' })
+        .eq('user_id', user.id);
+
+      setSessionCount(count || 0);
+    } catch (e) {
+      console.error('Error refreshing session count:', e);
+    }
+  };
 
   const loadProfile = async () => {
     try {
@@ -78,16 +173,65 @@ export default function Profile({ navigation }) {
       const { data: usageRow } = await supabase.rpc('get_my_usage');
       setUsage(usageRow);
 
-      const { count } = await supabase
-        .from('session_attendees')
-        .select('*', { count: 'exact' })
-        .eq('user_id', user.id);
-
-      setSessionCount(count || 0);
+      await refreshSessionCount();
     } catch (e) {
       console.error('Profile load error:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Profile picture upload
+  const handleAvatarPress = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        await uploadAvatar(result.assets[0]);
+      }
+    } catch (e) {
+      showAlert('Error', 'Failed to pick image: ' + e.message);
+    }
+  };
+
+  const uploadAvatar = async (imageAsset) => {
+    try {
+      setUploadingAvatar(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user');
+
+      const fileName = `${user.id}-${Date.now()}.jpg`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, imageAsset);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      // Update profile with avatar URL
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: urlData.publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setProfile((prev) => ({ ...prev, avatar_url: urlData.publicUrl }));
+      showAlert('Success', 'Profile picture updated!');
+    } catch (e) {
+      showAlert('Error', 'Failed to upload avatar: ' + e.message);
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -156,7 +300,7 @@ export default function Profile({ navigation }) {
     { icon: 'card-outline', label: 'Subscription & Billing', arrow: true },
     { icon: 'shield-checkmark-outline', label: 'Ban Management', arrow: true, onPress: () => navigation.navigate('BanManagement') },
     { icon: 'help-circle-outline', label: 'Help & Support', arrow: true },
-    { icon: 'document-text-outline', label: 'Terms & Privacy Policy', arrow: true },
+    { icon: 'document-text-outline', label: 'Terms & Privacy Policy', arrow: true, onPress: () => navigation.navigate('TermsAndPrivacy') },
   ];
 
   return (
@@ -165,18 +309,27 @@ export default function Profile({ navigation }) {
 
         {/* Profile Header */}
         <LinearGradient
-          colors={[palette.primaryBright, palette.primary, palette.primaryDeep]}
+          colors={[themePalette.primaryBright, themePalette.primary, themePalette.primaryDeep]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.profileHeader}
         >
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.75}>
-            <Ionicons name="arrow-back" size={20} color={palette.surface} />
+            <Ionicons name="arrow-back" size={20} color={themePalette.surface} />
           </TouchableOpacity>
 
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(profile?.full_name)}</Text>
-          </View>
+          <TouchableOpacity onPress={handleAvatarPress} disabled={uploadingAvatar} activeOpacity={0.75} style={styles.avatar}>
+            {profile?.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>{getInitials(profile?.full_name)}</Text>
+            )}
+            {uploadingAvatar && (
+              <View style={styles.avatarOverlay}>
+                <ActivityIndicator color={themePalette.surface} />
+              </View>
+            )}
+          </TouchableOpacity>
 
           <Text style={styles.name}>{profile?.full_name || 'User'}</Text>
           <Text style={styles.email}>{profile?.email || ''}</Text>
@@ -189,16 +342,16 @@ export default function Profile({ navigation }) {
                 value={usernameInput}
                 onChangeText={(t) => setUsernameInput(sanitizeUsernameInput(t))}
                 placeholder="username"
-                placeholderTextColor="rgba(255,255,255,0.6)"
+                placeholderTextColor={darkMode ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'}
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoFocus
               />
               <TouchableOpacity onPress={saveUsername} disabled={savingUsername} activeOpacity={0.8} style={styles.usernameSaveBtn}>
-                <Ionicons name="checkmark" size={16} color={palette.primary} />
+                <Ionicons name="checkmark" size={16} color={themePalette.primary} />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setEditingUsername(false)} activeOpacity={0.8} style={styles.usernameCancelBtn}>
-                <Ionicons name="close" size={16} color={palette.surface} />
+                <Ionicons name="close" size={16} color={themePalette.surface} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -206,7 +359,7 @@ export default function Profile({ navigation }) {
               <Text style={styles.usernameDisplayText}>
                 {profile?.username ? `@${profile.username}` : 'Set a username'}
               </Text>
-              <Ionicons name="pencil" size={11} color="rgba(255,255,255,0.75)" />
+              <Ionicons name="pencil" size={11} color={darkMode ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)'} />
             </TouchableOpacity>
           )}
           {usernameError ? <Text style={styles.usernameErrorText}>{usernameError}</Text> : null}
@@ -241,7 +394,7 @@ export default function Profile({ navigation }) {
               <Ionicons
                 name={profile?.plan && profile.plan !== 'free' ? 'sparkles' : 'pricetag-outline'}
                 size={19}
-                color={profile?.plan && profile.plan !== 'free' ? palette.premium : palette.primary}
+                color={profile?.plan && profile.plan !== 'free' ? themePalette.premium : themePalette.primary}
               />
             </View>
             <View style={styles.subTextWrap}>
@@ -260,7 +413,7 @@ export default function Profile({ navigation }) {
               onPress={() => showAlert('Kesher Premium', 'Paid plans are coming soon.')}
             >
               <Text style={styles.upgradeBtnText}>Upgrade</Text>
-              <Ionicons name="sparkles" size={13} color={palette.surface} />
+              <Ionicons name="sparkles" size={13} color={themePalette.surface} />
             </TouchableOpacity>
           )}
         </View>
@@ -269,13 +422,13 @@ export default function Profile({ navigation }) {
         {usage && (
           <View style={styles.usageCard}>
             <View style={styles.usageRow}>
-              <Ionicons name="videocam-outline" size={16} color={palette.primary} />
+              <Ionicons name="videocam-outline" size={16} color={themePalette.primary} />
               <Text style={styles.usageLabel}>Hosting minutes left</Text>
               <Text style={styles.usageValue}>{usage.host_minutes_balance}</Text>
             </View>
             {profile?.plan && profile.plan !== 'free' && (
               <View style={styles.usageRow}>
-                <Ionicons name="radio-button-on" size={14} color={palette.premium} />
+                <Ionicons name="radio-button-on" size={14} color={themePalette.premium} />
                 <Text style={styles.usageLabel}>Recording minutes left</Text>
                 <Text style={styles.usageValue}>{usage.recording_minutes_balance}</Text>
               </View>
@@ -298,7 +451,7 @@ export default function Profile({ navigation }) {
               activeOpacity={row.onPress ? 0.7 : 1}
             >
               <View style={styles.settingIconWrap}>
-                <Ionicons name={row.icon} size={17} color={palette.primary} />
+                <Ionicons name={row.icon} size={17} color={themePalette.primary} />
               </View>
               <Text style={styles.settingLabel}>{row.label}</Text>
 
@@ -306,11 +459,11 @@ export default function Profile({ navigation }) {
                 <Switch
                   value={row.value}
                   onValueChange={row.onChange}
-                  trackColor={{ true: palette.primary }}
-                  thumbColor={palette.surface}
+                  trackColor={{ true: themePalette.primary }}
+                  thumbColor={themePalette.surface}
                 />
               )}
-              {row.arrow && <Ionicons name="chevron-forward" size={17} color={palette.neutralText} />}
+              {row.arrow && <Ionicons name="chevron-forward" size={17} color={themePalette.neutralText} />}
             </TouchableOpacity>
           ))}
         </View>
@@ -326,7 +479,7 @@ export default function Profile({ navigation }) {
             });
           }}
         >
-          <Ionicons name="log-out-outline" size={17} color={palette.danger} />
+          <Ionicons name="log-out-outline" size={17} color={themePalette.danger} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
@@ -337,13 +490,13 @@ export default function Profile({ navigation }) {
 }
 
 const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
+  ios: { shadowColor: darkMode ? '#000' : '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
   android: { elevation: 3 },
-  default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
+  default: { boxShadow: darkMode ? '0 6px 18px rgba(0,0,0,0.18)' : '0 6px 18px rgba(42,26,107,0.08)' },
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.canvas },
+  container: { flex: 1, backgroundColor: themePalette.canvas },
   scroll: { paddingBottom: 50 },
 
   // ── Header ──
@@ -363,7 +516,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -371,34 +524,36 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.85)',
+    borderColor: darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.85)',
+    overflow: 'hidden',
   },
-  avatarText: { color: palette.surface, fontSize: 28, fontWeight: '800' },
-  name: { fontSize: 21, fontWeight: '800', color: palette.surface, letterSpacing: -0.3, marginTop: 2 },
-  email: { fontSize: 12.5, color: 'rgba(255,255,255,0.78)', fontWeight: '500' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
+  avatarText: { color: themePalette.surface, fontSize: 28, fontWeight: '800' },
+  avatarOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 21, fontWeight: '800', color: themePalette.surface, letterSpacing: -0.3, marginTop: 2 },
+  email: { fontSize: 12.5, color: darkMode ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.5)', fontWeight: '500' },
   usernameDisplayRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  usernameDisplayText: { fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
-  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  usernameAt: { fontSize: 12.5, color: 'rgba(255,255,255,0.7)', fontWeight: '700' },
-  usernameEditInput: { fontSize: 12.5, color: colors.white, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
-  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
-  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  usernameErrorText: { fontSize: 10.5, color: '#FFD7DE', fontWeight: '600', marginTop: 4 },
+  usernameDisplayText: { fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.5)', fontWeight: '600' },
+  usernameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, backgroundColor: darkMode ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  usernameAt: { fontSize: 12.5, color: darkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.4)', fontWeight: '700' },
+  usernameEditInput: { fontSize: 12.5, color: themePalette.ink, fontWeight: '600', minWidth: 90, paddingVertical: 2, outlineStyle: 'none' },
+  usernameSaveBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: darkMode ? 'rgba(255,255,255,0.9)' : themePalette.surface, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
+  usernameCancelBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: darkMode ? 'rgba(255,255,255,0.2)' : themePalette.line, alignItems: 'center', justifyContent: 'center' },
+  usernameErrorText: { fontSize: 10.5, color: themePalette.danger, fontWeight: '600', marginTop: 4 },
   roleBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)',
     paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20, marginTop: 2,
   },
-  roleBadgeText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
+  roleBadgeText: { color: themePalette.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Stats ──
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: palette.surface,
+    backgroundColor: themePalette.surface,
     marginHorizontal: 20,
     marginTop: -22,
     borderRadius: 18,
@@ -406,52 +561,52 @@ const styles = StyleSheet.create({
     ...cardShadow,
   },
   statCard: { flex: 1, alignItems: 'center', gap: 4 },
-  statDivider: { width: 1, backgroundColor: palette.line, marginVertical: 4 },
-  statValue: { fontSize: 26, fontWeight: '800', color: palette.primary, letterSpacing: -0.5 },
-  statValueSmall: { fontSize: 15, fontWeight: '800', color: palette.primary, marginTop: 5 },
-  statLabel: { fontSize: 10.5, color: palette.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
+  statDivider: { width: 1, backgroundColor: themePalette.line, marginVertical: 4 },
+  statValue: { fontSize: 26, fontWeight: '800', color: themePalette.primary, letterSpacing: -0.5 },
+  statValueSmall: { fontSize: 15, fontWeight: '800', color: themePalette.primary, marginTop: 5 },
+  statLabel: { fontSize: 10.5, color: themePalette.inkMuted, textAlign: 'center', fontWeight: '600', lineHeight: 13 },
 
   // ── Subscription ──
   subscriptionCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: palette.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, padding: 16, ...cardShadow,
   },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  subIconWrapPremium: { backgroundColor: palette.premiumSoft },
+  subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePalette.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  subIconWrapPremium: { backgroundColor: themePalette.premiumSoft },
   subTextWrap: { flex: 1 },
-  subPlan: { fontSize: 14.5, fontWeight: '700', color: palette.ink },
-  subDesc: { fontSize: 11.5, color: palette.inkMuted, marginTop: 2, fontWeight: '500' },
+  subPlan: { fontSize: 14.5, fontWeight: '700', color: themePalette.ink },
+  subDesc: { fontSize: 11.5, color: themePalette.inkMuted, marginTop: 2, fontWeight: '500' },
 
   // ── Usage ──
   usageCard: {
-    backgroundColor: palette.surface, marginHorizontal: 20, marginTop: 10,
+    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 10,
     borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
   },
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  usageLabel: { flex: 1, fontSize: 12.5, color: palette.inkMuted, fontWeight: '600' },
-  usageValue: { fontSize: 14, color: palette.ink, fontWeight: '800' },
-  usageNote: { fontSize: 11, color: palette.neutralText, fontWeight: '500', marginTop: 2 },
-  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: palette.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
-  upgradeBtnText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
+  usageLabel: { flex: 1, fontSize: 12.5, color: themePalette.inkMuted, fontWeight: '600' },
+  usageValue: { fontSize: 14, color: themePalette.ink, fontWeight: '800' },
+  usageNote: { fontSize: 11, color: themePalette.neutralText, fontWeight: '500', marginTop: 2 },
+  upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePalette.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
+  upgradeBtnText: { color: themePalette.surface, fontWeight: '700', fontSize: 12.5 },
 
   // ── Settings ──
   settingsCard: {
-    backgroundColor: palette.surface, marginHorizontal: 20, marginTop: 16,
+    backgroundColor: themePalette.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, overflow: 'hidden', ...cardShadow,
   },
   settingRow: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
-  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: palette.line },
-  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  settingLabel: { flex: 1, fontSize: 14, color: palette.ink, fontWeight: '600' },
+  settingRowBorder: { borderBottomWidth: 1, borderBottomColor: themePalette.line },
+  settingIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: themePalette.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  settingLabel: { flex: 1, fontSize: 14, color: themePalette.ink, fontWeight: '600' },
 
   // ── Logout / version ──
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginHorizontal: 20, marginTop: 16,
-    backgroundColor: palette.dangerSoft, paddingVertical: 15, borderRadius: 16,
+    backgroundColor: themePalette.dangerSoft, paddingVertical: 15, borderRadius: 16,
   },
-  logoutText: { color: palette.danger, fontSize: 15, fontWeight: '800' },
-  version: { textAlign: 'center', color: palette.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
+  logoutText: { color: themePalette.danger, fontSize: 15, fontWeight: '800' },
+  version: { textAlign: 'center', color: themePalette.neutralText, fontSize: 11.5, fontWeight: '500', marginTop: 18, marginBottom: 30 },
 });
