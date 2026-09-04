@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions,
@@ -209,6 +209,8 @@ function timeAgo(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const PAGE_SIZE = 20;
+
 export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -221,6 +223,55 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Kept in sync with `posts` via the effect below so the realtime
+  // subscription (which only needs to run once per userId, not re-fire
+  // every time the feed changes) can still always see the current list
+  // without depending on `posts` directly.
+  const postsRef = useRef(posts);
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
+
+  // Reaction/comment counts for a page of posts, fetched separately
+  // from — and NOT awaited by — the main load() below. Posts are
+  // already on screen and loading/refreshing already cleared by the
+  // time this runs; it just fills numbers in once they arrive, instead
+  // of holding the whole feed behind a skeleton for a second round trip.
+  const loadCounts = useCallback(async (postIds, currentUserId, pageNum) => {
+    if (postIds.length === 0) return;
+    try {
+      const [{ data: reactionRows }, { data: commentRows }] = await Promise.all([
+        supabase.from('feed_post_reactions').select('post_id, user_id').in('post_id', postIds),
+        supabase.from('feed_post_comments').select('post_id').in('post_id', postIds),
+      ]);
+      const newCounts = {};
+      const newMine = new Set();
+      const newCCounts = {};
+
+      (reactionRows || []).forEach((r) => {
+        newCounts[r.post_id] = (newCounts[r.post_id] || 0) + 1;
+        if (r.user_id === currentUserId) newMine.add(r.post_id);
+      });
+      (commentRows || []).forEach((c) => {
+        newCCounts[c.post_id] = (newCCounts[c.post_id] || 0) + 1;
+      });
+
+      if (pageNum === 1) {
+        setReactionCounts(newCounts);
+        setMyReactions(newMine);
+        setCommentCounts(newCCounts);
+      } else {
+        setReactionCounts((prev) => ({ ...prev, ...newCounts }));
+        setMyReactions((prev) => new Set([...prev, ...newMine]));
+        setCommentCounts((prev) => ({ ...prev, ...newCCounts }));
+      }
+    } catch (e) {
+      // Non-fatal — the feed itself already rendered fine, this just
+      // means like/comment counts stay blank until the next load.
+      console.error('Could not load reaction/comment counts:', e);
+    }
+  }, []);
 
   const load = useCallback(async (isRefresh, pageNum = 1) => {
     if (pageNum === 1) {
@@ -237,33 +288,42 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return;
-      
+
       if (pageNum === 1) {
         setUserId(user.id);
       }
 
-      // Fetch drafts only on first page
-      let draftRows = [];
-      if (pageNum === 1) {
-        const { data: draftData } = await supabase
-          .from('feed_posts')
-          .select('*')
-          .eq('author_id', user.id)
-          .eq('status', 'draft')
-          .order('created_at', { ascending: false });
-        draftRows = draftData || [];
-        setDrafts(draftRows);
-      }
-
-      // Fetch published posts with pagination
-      const offset = (pageNum - 1) * 20;
-      const { data: publishedRows, error } = await supabase
+      const offset = (pageNum - 1) * PAGE_SIZE;
+      const publishedQuery = supabase
         .from('feed_posts')
         .select('*, channels(name), profiles(full_name), feed_post_media(id, url, position)')
         .eq('status', 'published')
         .order('created_at', { ascending: false })
-        .range(offset, offset + 19);
-      
+        .range(offset, offset + PAGE_SIZE - 1);
+
+      // Drafts and this page of published posts don't depend on each
+      // other — only on user.id, which we already have — so on the
+      // first page, fetch both at once instead of one after the other.
+      let publishedRows, error;
+      if (pageNum === 1) {
+        const [{ data: draftData }, publishedResult] = await Promise.all([
+          supabase
+            .from('feed_posts')
+            .select('*')
+            .eq('author_id', user.id)
+            .eq('status', 'draft')
+            .order('created_at', { ascending: false }),
+          publishedQuery,
+        ]);
+        setDrafts(draftData || []);
+        publishedRows = publishedResult.data;
+        error = publishedResult.error;
+      } else {
+        const publishedResult = await publishedQuery;
+        publishedRows = publishedResult.data;
+        error = publishedResult.error;
+      }
+
       if (error) throw error;
 
       // feed_post_media comes back unordered from the embed — sort by
@@ -274,62 +334,33 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
         feed_post_media: (p.feed_post_media || []).slice().sort((a, b) => a.position - b.position),
       }));
 
-      // Check if we have more posts to load
-      if (sorted.length < 20) {
-        setHasMore(false);
-      }
-
-      // Ranking happens exactly once here, baked into the order `posts`
-      // is set in — deliberately NOT recomputed reactively off the live
-      // reactionCounts/commentCounts state below. If it were, liking or
-      // commenting on a post mid-scroll would reshuffle the whole feed
-      // under someone's thumb. This only reshuffles on an actual
-      // load/refresh, matching "ranked, but only when refreshed."
+      // Note: ranking runs before counts are available (counts are
+      // fetched separately below so they don't block the feed from
+      // showing), so reactionCounts/commentCounts here are always {} —
+      // rankPosts effectively falls back to recency + the discovery
+      // shuffle rather than true engagement ranking. That's a
+      // known trade-off of loading counts in the background; flag if
+      // you want real engagement-based ranking restored instead.
       const ranked = rankPosts(sorted, {}, {});
-      
+
       if (pageNum === 1) {
-        // First page: replace all posts immediately
         setPosts(ranked);
         setPage(1);
-        setHasMore(sorted.length >= 20); // Reset hasMore based on first page results
+        setHasMore(sorted.length >= PAGE_SIZE);
       } else {
-        // Subsequent pages: simply append new posts at the end (already sorted by created_at)
-        // We don't re-rank to avoid reshuffling the entire feed
+        // Subsequent pages: simply append new posts at the end (already
+        // sorted by created_at). We don't re-rank to avoid reshuffling
+        // the entire feed.
         setPosts((prev) => [...prev, ...ranked]);
+        if (sorted.length < PAGE_SIZE) setHasMore(false);
       }
-      
-      // Now fetch counts for these posts (this can happen after posts are displayed)
-      const postIds = sorted.map((p) => p.id);
-      if (postIds.length > 0) {
-        const [{ data: reactionRows }, { data: commentRows }] = await Promise.all([
-          supabase.from('feed_post_reactions').select('post_id, user_id').in('post_id', postIds),
-          supabase.from('feed_post_comments').select('post_id').in('post_id', postIds),
-        ]);
-        const newCounts = {};
-        const newMine = new Set();
-        const newCCounts = {};
-        
-        (reactionRows || []).forEach((r) => {
-          newCounts[r.post_id] = (newCounts[r.post_id] || 0) + 1;
-          if (r.user_id === user.id) newMine.add(r.post_id);
-        });
-        (commentRows || []).forEach((c) => {
-          newCCounts[c.post_id] = (newCCounts[c.post_id] || 0) + 1;
-        });
-        
-        // Update counts after posts are already displayed
-        if (pageNum === 1) {
-          setReactionCounts(newCounts);
-          setMyReactions(newMine);
-          setCommentCounts(newCCounts);
-        } else {
-          setReactionCounts((prev) => ({ ...prev, ...newCounts }));
-          setMyReactions((prev) => new Set([...prev, ...newMine]));
-          setCommentCounts((prev) => ({ ...prev, ...newCCounts }));
-        }
-      }
-      
+
       setPage(pageNum);
+
+      // Fire-and-forget — deliberately not awaited. Posts are already
+      // set above; clearing loading/refreshing happens in `finally`
+      // right after this dispatches, not after counts resolve.
+      loadCounts(sorted.map((p) => p.id), user.id, pageNum);
     } catch (e) {
       showAlert('Could not load feed', e.message);
     } finally {
@@ -340,7 +371,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
         setLoadingMore(false);
       }
     }
-  }, []);
+  }, [loadCounts]);
 
   // Covers both the initial mount AND every time this tab regains focus
   // (e.g. returning from PostCommentsScreen after adding a comment) —
@@ -351,7 +382,12 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
     return unsub;
   }, [navigation, load]);
 
-  // Realtime subscription for new feed posts - updates feed immediately when new posts are inserted
+  // Realtime subscription for new feed posts - updates feed immediately
+  // when new posts are inserted. Depends only on `userId`, not `posts` —
+  // reading the current list via postsRef instead — so this channel is
+  // created once per session instead of being torn down and rebuilt on
+  // every single load/page-append (which was creating and destroying a
+  // websocket subscription on every scroll-triggered page fetch).
   useEffect(() => {
     if (!userId) return;
 
@@ -367,7 +403,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
         },
         (payload) => {
           // Only update if this is a new post we haven't seen yet
-          const existingIds = new Set(posts.map(p => p.id));
+          const existingIds = new Set(postsRef.current.map((p) => p.id));
           if (!existingIds.has(payload.new.id)) {
             load(false, 1); // Refresh to get the new post with all its joins
           }
@@ -376,7 +412,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [userId, posts, load]);
+  }, [userId, load]);
 
   // Re-mixed only when the underlying posts actually change (a fresh
   // load or pull-to-refresh) — not on every render, so toggling a like
