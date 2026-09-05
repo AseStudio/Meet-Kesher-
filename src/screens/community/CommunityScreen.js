@@ -34,6 +34,17 @@ const palette = {
  */
 export default function CommunityScreen({ navigation, route }) {
   const [tab, setTab] = useState('channels'); // 'channels' | 'feed'
+  // Once the Feed tab has been opened once, keep it mounted permanently
+  // (just hidden via `display: 'none'` when not active) instead of
+  // unmounting/remounting it every time the toggle switches — a plain
+  // {tab === 'channels' ? <ChannelsTab/> : <FeedTab/>} ternary was
+  // destroying FeedTab's whole state (loaded posts, pagination
+  // position, everything) on every switch away, forcing a full
+  // from-scratch reload each time the user tapped back to "Feed".
+  const [feedEverOpened, setFeedEverOpened] = useState(false);
+  useEffect(() => {
+    if (tab === 'feed') setFeedEverOpened(true);
+  }, [tab]);
   const [profile, setProfile] = useState(null);
   const [verified, setVerified] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -142,10 +153,13 @@ export default function CommunityScreen({ navigation, route }) {
       </View>
 
       <View style={styles.body}>
-        {tab === 'channels' ? (
+        <View style={{ flex: 1, display: tab === 'channels' ? 'flex' : 'none' }}>
           <ChannelsTab navigation={navigation} isHost={isHost} isVerified={verified} />
-        ) : (
-          <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} isPremium={!!profile?.is_premium} />
+        </View>
+        {feedEverOpened && (
+          <View style={{ flex: 1, display: tab === 'feed' ? 'flex' : 'none' }}>
+            <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} isPremium={!!profile?.is_premium} />
+          </View>
         )}
       </View>
 

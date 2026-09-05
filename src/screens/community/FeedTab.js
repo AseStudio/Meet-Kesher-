@@ -290,8 +290,6 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   // getSession()/query round trips stack up concurrently.
   const hasLoadedOnceRef = useRef(false);
   const loadingRef = useRef(false);
-  const lastFocusTimeRef = useRef(0);
-  const MIN_FOCUS_INTERVAL = 30000; // 30 seconds
 
   const load = useCallback(async (isRefresh, pageNum = 1) => {
     if (loadingRef.current) return;
@@ -382,7 +380,6 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
             const fresh = ranked.filter((p) => !existingIds.has(p.id));
             return fresh.length > 0 ? [...fresh, ...prev] : prev;
           });
-          setHasMore(sorted.length >= PAGE_SIZE);
         } else {
           setPosts(ranked);
           setHasMore(sorted.length >= PAGE_SIZE);
@@ -420,14 +417,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   // React Navigation's 'focus' event fires on first mount too, so a
   // separate mount-only effect calling load() would just double-fetch.
   useEffect(() => {
-    const unsub = navigation.addListener('focus', () => {
-      const now = Date.now();
-      if (now - lastFocusTimeRef.current < MIN_FOCUS_INTERVAL) {
-        return; // Skip if we just focused recently
-      }
-      lastFocusTimeRef.current = now;
-      load(false, 1);
-    });
+    const unsub = navigation.addListener('focus', () => load(false, 1));
     return unsub;
   }, [navigation, load]);
 
