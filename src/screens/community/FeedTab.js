@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions,
+  FlatList, ActivityIndicator, RefreshControl, ScrollView, Image, Dimensions, Platform,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
+import FeedAdUnit from '../../components/FeedAdUnit';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -655,6 +656,24 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
                     <Text style={styles.upgradeBtnText}>Go Premium</Text>
                     <Ionicons name="sparkles" size={13} color={palette.surface} />
                   </TouchableOpacity>
+                </View>
+              );
+            }
+
+            if (item._kind === 'ad_slot' && Platform.OS === 'web') {
+              // Real AdSense here, on web only — no mobile-app SDK exists
+              // for AdSense at all (that's AdMob, a separate product not
+              // yet wired in), so native keeps the rotating placeholder
+              // text below instead of this branch.
+              return (
+                <View style={styles.postCard}>
+                  <View style={styles.postHeader}>
+                    <View style={[styles.postIconWrap, { backgroundColor: meta.iconBg }]}>
+                      <Ionicons name={meta.icon} size={16} color={meta.iconColor} />
+                    </View>
+                    <Text style={styles.postKind}>{meta.label}</Text>
+                  </View>
+                  <FeedAdUnit />
                 </View>
               );
             }
