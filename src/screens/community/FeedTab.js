@@ -413,10 +413,23 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
   }, [loadCounts]);
 
   // Covers both the initial mount AND every time this tab regains focus
-  // (e.g. returning from PostCommentsScreen after adding a comment) —
-  // React Navigation's 'focus' event fires on first mount too, so a
-  // separate mount-only effect calling load() would just double-fetch.
+  // (e.g. returning from PostCommentsScreen after adding a comment).
+  //
+  // This is NOT enough on its own, though: 'focus' only fires on a real
+  // navigator screen transition. FeedTab is a plain component rendered
+  // conditionally inside CommunityScreen (the actual screen) — by the
+  // time a user taps the in-screen "Feed" toggle and this component
+  // first mounts, CommunityScreen is typically already focused, so no
+  // fresh 'focus' event ever arrives for this listener to catch. That
+  // was leaving `loading` stuck at its initial `true` forever — the
+  // skeleton never went away because load() was simply never called,
+  // until the user navigated to a real screen (e.g. ComposePost) and
+  // back, which finally produced a genuine focus transition. The
+  // explicit call below guarantees the first load actually happens;
+  // the loadingRef guard in load() means an occasional near-simultaneous
+  // focus event just no-ops instead of double-fetching.
   useEffect(() => {
+    load(false, 1);
     const unsub = navigation.addListener('focus', () => load(false, 1));
     return unsub;
   }, [navigation, load]);
