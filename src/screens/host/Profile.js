@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, TextInput, Image, ActivityIndicator, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -216,6 +216,38 @@ export default function Profile({ navigation }) {
   const getInitials = (name) =>
     (name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
 
+  // Minimal, functional first pass — a real tier-comparison screen with
+  // Stripe as a second option is the natural next step, once Stripe's
+  // Price IDs exist. This exists now specifically to let the whole
+  // pipeline (checkout → Paystack → webhook → profiles.plan) actually
+  // get tested end to end rather than staying theoretical.
+  const startCheckout = async (plan) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout', {
+        body: { processor: 'paystack', plan },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (Platform.OS === 'web') {
+        window.open(data.url, '_blank');
+      } else {
+        await Linking.openURL(data.url);
+      }
+    } catch (e) {
+      showAlert('Could not start checkout', e.message || 'Please try again.');
+    }
+  };
+
+  const handleUpgradePress = () => {
+    showAlert('Choose a plan', 'All plans renew monthly.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Pro — $4.99/mo', onPress: () => startCheckout('pro') },
+      { text: 'Max — $8.99/mo', onPress: () => startCheckout('max') },
+      { text: 'Premium — $15.99/mo', onPress: () => startCheckout('premium') },
+    ]);
+  };
+
   const startEditingUsername = () => {
     setUsernameInput(profile?.username || '');
     setUsernameError('');
@@ -387,7 +419,7 @@ export default function Profile({ navigation }) {
             <TouchableOpacity
               style={styles.upgradeBtn}
               activeOpacity={0.85}
-              onPress={() => showAlert('Kesher Premium', 'Paid plans are coming soon.')}
+              onPress={handleUpgradePress}
             >
               <Text style={styles.upgradeBtnText}>Upgrade</Text>
               <Ionicons name="sparkles" size={13} color={themePalette.surface} />
