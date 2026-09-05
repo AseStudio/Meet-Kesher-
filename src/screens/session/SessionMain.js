@@ -251,6 +251,44 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const uidToUserRef = useRef({});
   useEffect(() => { uidToUserRef.current = uidToUser; }, [uidToUser]);
 
+  // Host's OWN minutes — deducted live, in small increments, WHILE the
+  // session is running, not as one lump sum at the end. Billing the
+  // whole duration only at endSession() (the previous approach) meant a
+  // host who force-quits or crashes instead of ending cleanly walks
+  // away having paid nothing for time they actually used — the entire
+  // session was free if you just never hit "End". Ticking against real
+  // elapsed time (Date.now() deltas, not a naive per-tick counter, so
+  // timer drift or the tab being backgrounded and resuming can't skew
+  // the total) and persisting each whole minute to the database as it
+  // completes means the maximum anyone can dodge by quitting abruptly
+  // is the sub-minute remainder since the last tick — a few seconds at
+  // most, not a whole session.
+  const lastHostTickRef = useRef(Date.now());
+  const pendingHostMinutesRef = useRef(0);
+  const hostMinuteTickIntervalRef = useRef(null);
+  const HOST_MINUTE_TICK_MS = 60000;
+  useEffect(() => {
+    lastHostTickRef.current = Date.now();
+    const tick = setInterval(async () => {
+      const now = Date.now();
+      pendingHostMinutesRef.current += (now - lastHostTickRef.current) / 60000;
+      lastHostTickRef.current = now;
+
+      const wholeMinutes = Math.floor(pendingHostMinutesRef.current);
+      if (wholeMinutes > 0) {
+        pendingHostMinutesRef.current -= wholeMinutes;
+        try {
+          await supabase.rpc('consume_host_minutes', { p_minutes: wholeMinutes });
+        } catch (e) {
+          // Best-effort — if one tick's deduction fails, that minute
+          // just goes unbilled; not worth interrupting the session over.
+        }
+      }
+    }, HOST_MINUTE_TICK_MS);
+    hostMinuteTickIntervalRef.current = tick;
+    return () => clearInterval(tick);
+  }, []);
+
   // Guest minute-penalty tracking. Guests have no stable identity to
   // track individually (no account, no user_id) — so instead of trying
   // to time each guest precisely, this integrates "how many guests were
@@ -1103,6 +1141,23 @@ function getProfileKey(uplink = 0, downlink = 0) {
           await supabase.rpc('apply_guest_minute_penalty', {
             p_guest_minutes: Math.round(guestMinutesAccumulatorRef.current),
           });
+        } catch (e) {}
+      }
+
+      // The periodic tick above already billed every whole minute as it
+      // completed — stop it now and settle only whatever sub-minute
+      // remainder is left (rounded up, so the final partial minute
+      // isn't given away free), instead of re-billing the full duration
+      // from scratch (which would double-charge on top of the ticks).
+      if (hostMinuteTickIntervalRef.current) {
+        clearInterval(hostMinuteTickIntervalRef.current);
+        hostMinuteTickIntervalRef.current = null;
+      }
+      const finalPending = pendingHostMinutesRef.current + (Date.now() - lastHostTickRef.current) / 60000;
+      const finalMinutes = Math.ceil(finalPending);
+      if (finalMinutes > 0) {
+        try {
+          await supabase.rpc('consume_host_minutes', { p_minutes: finalMinutes });
         } catch (e) {}
       }
 
