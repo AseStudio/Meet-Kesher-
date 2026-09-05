@@ -51,17 +51,69 @@ export default function TimerScreen({ navigation, route }) {
     loadData();
   }, []);
 
-  // Countdown effect
+  // Realtime subscription to sync with database changes
+  useEffect(() => {
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+
+      // Subscribe to profile and usage changes for this user
+      const channel = supabase
+        .channel('host_minutes_realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${user.id}`,
+          },
+          () => {
+            // Refetch data when profile changes (e.g., premium status, minutes balance)
+            loadData();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'sessions',
+            filter: `host_id=eq.${user.id}`,
+          },
+          () => {
+            // Refetch data when any session for this host changes
+            loadData();
+          }
+        )
+        .subscribe();
+
+      return channel;
+    };
+
+    const channelPromise = setupRealtime();
+
+    return () => {
+      channelPromise.then((channel) => {
+        if (channel) {
+          supabase.removeChannel(channel);
+        }
+      });
+    };
+  }, []);
+
+  // Countdown effect - updates every second for smooth display
   useEffect(() => {
     if (hostMinutes === null || hostMinutes === 0) return;
 
     const interval = setInterval(() => {
       setHostMinutes(prev => {
         if (prev === null) return null;
-        const newMinutes = Math.max(0, prev - 1);
+        const newMinutes = Math.max(0, prev - (1 / 60));
+        const displayMinutes = Math.floor(newMinutes);
         
         // Show notification at 5 minutes
-        if (newMinutes === 5 && !notificationShown.five) {
+        if (displayMinutes === 5 && !notificationShown.five) {
           setNotificationShown(prev => ({ ...prev, five: true }));
           if (Platform.OS === 'web') {
             window.alert('5 session minutes remaining\n\nupgrade to Premium for extended session minutes');
@@ -74,7 +126,7 @@ export default function TimerScreen({ navigation, route }) {
         }
         
         // Show notification and end session at 0 minutes
-        if (newMinutes === 0 && !notificationShown.zero) {
+        if (displayMinutes === 0 && !notificationShown.zero) {
           setNotificationShown(prev => ({ ...prev, zero: true }));
           if (Platform.OS === 'web') {
             window.alert('You have exhausted your session minutes');
@@ -87,7 +139,7 @@ export default function TimerScreen({ navigation, route }) {
         
         return newMinutes;
       });
-    }, 60000); // Update every minute
+    }, 1000); // Update every second
 
     return () => clearInterval(interval);
   }, [hostMinutes, notificationShown, isPremium]);
@@ -120,7 +172,7 @@ export default function TimerScreen({ navigation, route }) {
 
   const formatMinutes = (mins) => {
     if (mins === null) return '--';
-    return mins.toString();
+    return Math.floor(mins).toString();
   };
 
   const isLow = hostMinutes !== null && hostMinutes <= 5;
