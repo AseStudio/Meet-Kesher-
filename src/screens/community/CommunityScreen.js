@@ -158,7 +158,7 @@ export default function CommunityScreen({ navigation, route }) {
         </View>
         {feedEverOpened && (
           <View style={{ flex: 1, display: tab === 'feed' ? 'flex' : 'none' }}>
-            <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} isPremium={!!profile?.is_premium} />
+            <FeedTab navigation={navigation} isHost={isHost} isVerified={verified} isPremium={!!profile?.plan && profile.plan !== 'free'} />
           </View>
         )}
       </View>

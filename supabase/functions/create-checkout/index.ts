@@ -65,7 +65,7 @@ serve(async (req) => {
         body: JSON.stringify({
           email: user.email,
           plan: planCode,
-          callback_url: `${APP_URL}/app?upgrade=paystack`,
+          callback_url: `${APP_URL}/app?upgrade=paystack&plan=${plan}`,
           metadata: { user_id: user.id, plan },
         }),
       });

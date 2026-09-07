@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, StyleSheet, Easing } from 'react-native';
+import { View, Text, Animated, StyleSheet, Easing, Platform } from 'react-native';
 import { Circle, Path, Svg } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
@@ -72,6 +72,20 @@ const routeBasedOnSession = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
+
+    // If Paystack just redirected back here after checkout, route
+    // straight to the confirmation/polling screen instead of falling
+    // through to normal dashboard routing below — profiles.plan hasn't
+    // necessarily updated yet at this exact moment (that happens via
+    // webhook, asynchronously, not by this redirect itself), so normal
+    // routing can't just assume the upgrade already landed.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('upgrade') === 'paystack') {
+        navigation.replace('ConfirmingPayment', { plan: params.get('plan') });
+        return;
+      }
+    }
 
     // No logged-in user
     if (!session?.user) {

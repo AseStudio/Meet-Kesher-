@@ -226,7 +226,23 @@ export default function Profile({ navigation }) {
       const { data, error } = await supabase.functions.invoke('create-checkout', {
         body: { processor: 'paystack', plan },
       });
-      if (error) throw error;
+
+      if (error) {
+        // supabase-js doesn't parse the response body into `data` when
+        // the function returns a non-2xx status — it just throws this
+        // generic wrapper instead. The actual error message the
+        // function sent back is still there, just needs pulling out of
+        // error.context (the raw Response) by hand.
+        let message = error.message;
+        try {
+          const body = await error.context.json();
+          if (body?.error) message = body.error;
+        } catch (e) {
+          // context wasn't JSON, or didn't exist — fall back to the
+          // generic message rather than crashing on this best-effort read.
+        }
+        throw new Error(message);
+      }
       if (data?.error) throw new Error(data.error);
 
       if (Platform.OS === 'web') {
