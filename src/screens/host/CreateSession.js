@@ -100,7 +100,14 @@ export default function CreateSession({ navigation }) {
   // explicit heads-up every time they do, not just once.
   const handleToggleAllowGuests = (next) => {
     if (next && plan === 'free') {
-      showAlert('Kesher Premium', 'Allowing guest attendees is a paid-plan feature. Upgrade to enable it for your sessions.');
+      showAlert(
+        'Kesher Premium',
+        'Allowing guest attendees is a paid-plan feature — upgrade to enable it for your sessions.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'See Plans', onPress: () => navigation.navigate('Upgrade') },
+        ]
+      );
       return;
     }
     if (next) {

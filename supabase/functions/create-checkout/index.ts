@@ -64,6 +64,12 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           email: user.email,
+          // Required by Paystack's API even when a plan is attached —
+          // but per their own docs, "the amount used to create the plan
+          // takes precedence when subscribing to a plan," so this value
+          // is never what actually gets charged. It just has to exist
+          // and clear their minimum (100 kobo).
+          amount: 100,
           plan: planCode,
           callback_url: `${APP_URL}/app?upgrade=paystack&plan=${plan}`,
           metadata: { user_id: user.id, plan },

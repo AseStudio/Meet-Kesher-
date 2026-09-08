@@ -16,6 +16,7 @@ import VerifyEmailScreen from './src/screens/auth/VerifyEmailScreen';
 import CreateSession from './src/screens/host/CreateSession';
 import Profile from './src/screens/host/Profile';
 import ConfirmingPaymentScreen from './src/screens/host/ConfirmingPaymentScreen';
+import UpgradeScreen from './src/screens/host/UpgradeScreen';
 import BanManagement from './src/screens/host/BanManagement';
 import SubmissionsInbox from './src/screens/host/SubmissionsInbox';
 import SubmitFile from './src/screens/attendee/SubmitFile';
@@ -104,6 +105,7 @@ export default function App() {
           <Stack.Screen name="CreateSession" component={CreateSession} />
           <Stack.Screen name="Profile" component={Profile} />
           <Stack.Screen name="ConfirmingPayment" component={ConfirmingPaymentScreen} />
+          <Stack.Screen name="Upgrade" component={UpgradeScreen} />
           <Stack.Screen name="BanManagement" component={BanManagement} />
           <Stack.Screen name="SubmissionsInbox" component={SubmissionsInbox} />
           <Stack.Screen name="SubmitFile" component={SubmitFile} />

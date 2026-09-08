@@ -651,7 +651,7 @@ export default function FeedTab({ navigation, isHost, isVerified, isPremium }) {
                   <TouchableOpacity
                     style={styles.upgradeBtn}
                     activeOpacity={0.85}
-                    onPress={() => navigation.navigate('Profile')}
+                    onPress={() => navigation.navigate('Upgrade')}
                   >
                     <Text style={styles.upgradeBtnText}>Go Premium</Text>
                     <Ionicons name="sparkles" size={13} color={palette.surface} />

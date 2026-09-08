@@ -1036,7 +1036,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
   const toggleRecording = async () => {
     if (!isPremium) {
-      showAlert('Kesher Premium', 'Recording sessions is a Premium feature. Upgrade from your Profile to record and download your sessions.');
+      showAlert(
+        'Kesher Premium',
+        'Recording sessions is a Premium feature — upgrade to record and download your sessions.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'See Plans', onPress: () => navigation.navigate('Upgrade') },
+        ]
+      );
       return;
     }
     if (recording) {
