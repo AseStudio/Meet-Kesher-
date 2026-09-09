@@ -220,10 +220,25 @@ export default function LobbyScreen({ navigation, route }) {
           .maybeSingle();
 
         if (!existing) {
-          await supabase.from('session_attendees').insert({
+          const { error: insertError } = await supabase.from('session_attendees').insert({
             session_id: session.id,
             user_id: user.id,
           });
+
+          // Same bug as useJoinSessionByCode.js had — this result was
+          // never checked, so the enforce_attend_cap() trigger's
+          // rejection went completely unnoticed and this person would
+          // just sit in the lobby anyway, then get waved into the live
+          // session once it started regardless of being over their cap.
+          if (insertError) {
+            if (insertError.message?.includes('attend_cap_reached')) {
+              showAlert("You've reached your monthly session limit for your plan. Upgrade to attend more.");
+            } else {
+              showAlert('Could not join this session', insertError.message);
+            }
+            navigation.navigate('AttendeeDashboard');
+            return;
+          }
         }
       }
 

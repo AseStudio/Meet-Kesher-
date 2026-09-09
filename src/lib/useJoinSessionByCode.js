@@ -75,10 +75,26 @@ export function useJoinSessionByCode(navigation) {
           .maybeSingle();
 
         if (!existing) {
-          await supabase.from('session_attendees').insert({
+          const { error: insertError } = await supabase.from('session_attendees').insert({
             session_id: session.id,
             user_id: user.id,
           });
+
+          // This insert's result was never being checked before — the
+          // enforce_attend_cap() trigger genuinely rejects the row once
+          // someone's over their monthly limit, but that rejection was
+          // silently discarded and the code let them into the session
+          // anyway. The trigger existed; nothing was actually listening
+          // to it.
+          if (insertError) {
+            if (insertError.message?.includes('attend_cap_reached')) {
+              setJoinError("You've reached your monthly session limit for your plan. Upgrade to attend more.");
+            } else {
+              setJoinError(insertError.message || 'Could not join this session.');
+            }
+            setJoinLoading(false);
+            return;
+          }
         }
       }
 

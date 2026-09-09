@@ -35,6 +35,12 @@ const palette = {
   neutralText: colors.grey,
 };
 
+// Matches the caps enforce_attend_cap() checks server-side — kept in
+// sync manually since the DB function's CASE statement isn't something
+// the client can introspect directly. premium: null means unlimited,
+// same convention the trigger itself uses.
+const ATTEND_CAPS = { free: 3, pro: 5, max: 10, premium: 20 };
+
 const MEMBER_SINCE_FORMAT = (iso) => {
   try {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
@@ -410,6 +416,18 @@ export default function Profile({ navigation }) {
                 <Text style={styles.usageValue}>{usage.recording_minutes_balance}</Text>
               </View>
             )}
+            <View style={styles.usageRow}>
+              <Ionicons name="people-outline" size={16} color={themePalette.primary} />
+              <Text style={styles.usageLabel}>Sessions you can attend</Text>
+              <Text style={styles.usageValue}>
+                {(() => {
+                  const cap = ATTEND_CAPS[profile?.plan] ?? ATTEND_CAPS.free;
+                  if (cap === null) return 'Unlimited';
+                  const used = usage.attended_sessions || 0;
+                  return `${Math.max(0, cap - used)} of ${cap} left`;
+                })()}
+              </Text>
+            </View>
             <Text style={styles.usageNote}>
               {profile?.plan && profile.plan !== 'free'
                 ? 'Unused minutes roll over to next month.'

@@ -15,6 +15,7 @@ import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
+import { getSessionModeCapabilities } from '../../lib/sessionModes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SPEAKER_SWITCH_DELAY = 600;
@@ -30,6 +31,10 @@ const TOOLBAR_H_PADDING = 20;
 
 export default function AttendeeSession({ navigation, route }) {
   const session = route.params?.session;
+  // Same shared per-mode matrix SessionMain.js uses — see
+  // lib/sessionModes.js. Kept as one source of truth so the attendee
+  // and host toolbars can't drift out of sync with each other.
+  const modeCaps = getSessionModeCapabilities(session?.mode);
   // Present only for someone who joined via GuestJoinScreen without an
   // account — {name, email}. Used below so a guest never gets routed to
   // 'AttendeeDashboard', which doesn't exist for them.
@@ -1108,40 +1113,59 @@ export default function AttendeeSession({ navigation, route }) {
               <Ionicons name={cameraOff ? 'videocam-off-outline' : 'videocam-outline'} size={toolIconSize} color={colors.white} />
               {toolShowLabel && <Text style={styles.toolLabel}>{cameraOff ? 'Cam Off' : 'Cam On'}</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={() => setShowReactions(true)}>
-              <Ionicons name="happy-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>React</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'hand' && styles.toolBtnActive]} onPress={() => sendSignal('hand')}>
-              <Ionicons name={SIGNAL_ICON.hand} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Hand</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'correction' && styles.toolBtnRed]} onPress={() => sendSignal('correction')}>
-              <Ionicons name={SIGNAL_ICON.correction} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Correct</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'speak' && styles.toolBtnActive]} onPress={() => sendSignal('speak')}>
-              <Ionicons name={SIGNAL_ICON.speak} size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Speak</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openChat}>
-              <Ionicons name="chatbubble-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Chat</Text>}
-              {!!unreadCount && (
-                <View style={styles.toolBadge}>
-                  <Text style={styles.toolBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openPoll}>
-              <Ionicons name="stats-chart-outline" size={toolIconSize} color={colors.white} />
-              {toolShowLabel && <Text style={styles.toolLabel}>Poll</Text>}
-              {!!pollNotice && (
-                <View style={styles.toolBadge}>
-                  <Text style={styles.toolBadgeText}>!</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            {modeCaps.reactions && (
+              <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={() => setShowReactions(true)}>
+                <Ionicons name="happy-outline" size={toolIconSize} color={colors.white} />
+                {toolShowLabel && <Text style={styles.toolLabel}>React</Text>}
+              </TouchableOpacity>
+            )}
+            {modeCaps.signals && (
+              <>
+                <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'hand' && styles.toolBtnActive]} onPress={() => sendSignal('hand')}>
+                  <Ionicons name={SIGNAL_ICON.hand} size={toolIconSize} color={colors.white} />
+                  {toolShowLabel && <Text style={styles.toolLabel}>Hand</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'correction' && styles.toolBtnRed]} onPress={() => sendSignal('correction')}>
+                  <Ionicons name={SIGNAL_ICON.correction} size={toolIconSize} color={colors.white} />
+                  {toolShowLabel && <Text style={styles.toolLabel}>Correct</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, activeSignal === 'speak' && styles.toolBtnActive]} onPress={() => sendSignal('speak')}>
+                  <Ionicons name={SIGNAL_ICON.speak} size={toolIconSize} color={colors.white} />
+                  {toolShowLabel && <Text style={styles.toolLabel}>Speak</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+            {modeCaps.chat && (
+              <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openChat}>
+                <Ionicons name="chatbubble-outline" size={toolIconSize} color={colors.white} />
+                {toolShowLabel && <Text style={styles.toolLabel}>Chat</Text>}
+                {!!unreadCount && (
+                  <View style={styles.toolBadge}>
+                    <Text style={styles.toolBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+            {modeCaps.poll && (
+              <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]} onPress={openPoll}>
+                <Ionicons name="stats-chart-outline" size={toolIconSize} color={colors.white} />
+                {toolShowLabel && <Text style={styles.toolLabel}>Poll</Text>}
+                {!!pollNotice && (
+                  <View style={styles.toolBadge}>
+                    <Text style={styles.toolBadgeText}>!</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+            {modeCaps.documents && (
+              <TouchableOpacity
+                style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }]}
+                onPress={() => navigation.navigate('DocumentExchangePanel', { session, currentUser: currentUserRef.current, isHost: false })}
+              >
+                <Ionicons name="document-attach-outline" size={toolIconSize} color={colors.white} />
+                {toolShowLabel && <Text style={styles.toolLabel}>Docs</Text>}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={[styles.toolBtn, { width: toolBtnSize, height: toolBtnSize }, styles.toolBtnEnd]} onPress={handleLeave}>
               <Ionicons name="exit-outline" size={toolIconSize} color={colors.white} />
               {toolShowLabel && <Text style={styles.toolLabel}>Leave</Text>}

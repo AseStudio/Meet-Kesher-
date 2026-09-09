@@ -26,7 +26,7 @@ const PLANS = [
   { key: 'free', name: 'Free', price: '$0', hostMinutes: 30, recordingMinutes: 0, maxAttendees: 20, attendCap: '3 sessions/mo' },
   { key: 'pro', name: 'Pro', price: '$4.99/mo', hostMinutes: 90, recordingMinutes: 30, maxAttendees: 30, attendCap: '5 sessions/mo' },
   { key: 'max', name: 'Max', price: '$8.99/mo', hostMinutes: 180, recordingMinutes: 60, maxAttendees: 40, attendCap: '10 sessions/mo' },
-  { key: 'premium', name: 'Premium', price: '$15.99/mo', hostMinutes: 540, recordingMinutes: 180, maxAttendees: 50, attendCap: 'Unlimited' },
+  { key: 'premium', name: 'Premium', price: '$15.99/mo', hostMinutes: 540, recordingMinutes: 180, maxAttendees: 50, attendCap: '20 sessions/mo' },
 ];
 
 export default function UpgradeScreen({ navigation }) {

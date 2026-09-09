@@ -16,6 +16,7 @@ import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 import { showAlert } from '../../lib/alert';
+import { getSessionModeCapabilities } from '../../lib/sessionModes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const REACTIONS = ['👍', '👏', '❤️', '😂', '🔥', '😮'];
@@ -34,6 +35,11 @@ const TOOLBAR_H_PADDING = 20; // total horizontal inset the bar reserves
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
+  // Drives which toolbar buttons, board types, and panels this session
+  // shows — see lib/sessionModes.js for the full per-mode matrix. Kept
+  // as one shared source of truth rather than repeating the same
+  // if/else chain independently here and in AttendeeSession.js.
+  const modeCaps = getSessionModeCapabilities(session?.mode);
   const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
   const insets = useSafeAreaInsets();
   const styles = useSessionMainStyles(scale, isSmall, width, height, insets);
@@ -1092,96 +1098,107 @@ function getProfileKey(uplink = 0, downlink = 0) {
     }
   };
 
-  const endSession = () => {
+  // The actual work of ending a session — pulled out of endSession()
+  // below so it can be triggered two ways that both need to run the
+  // EXACT same path (status update, recording flush, guest penalty,
+  // stopping the host-minute tick + final catch-up billing, leaving
+  // Agora, navigating to the summary): the host tapping "End" here,
+  // and TimerScreen's countdown forcing the session closed at 0
+  // minutes. Passed to TimerScreen as a navigation param instead of
+  // TimerScreen re-implementing any of this separately — a prior
+  // version of this bug meant TimerScreen's own separate ending logic
+  // never stopped the host-minute tick interval above, so it kept
+  // billing a session already marked 'ended' out from under it.
+  const endSessionImmediately = async () => {
     // Status update goes FIRST and is checked. This exact function has
     // regressed back to the "leaveAgora first, unguarded, no check" shape
     // twice now in different uploads — reordering so the actual state
     // change (ending the session for everyone) happens before the
     // best-effort Agora cleanup, and checking its result, is what stops a
     // flaky Agora disconnect from silently eating the whole handler again.
-    const proceed = async () => {
-      const { error } = await supabase.from('sessions').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', session?.id);
-      if (error) {
-        if (Platform.OS === 'web') window.alert(`Could not end session: ${error.message}`);
-        else Alert.alert('Could not end session', error.message);
-        return;
-      }
+    const { error } = await supabase.from('sessions').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', session?.id);
+    if (error) {
+      if (Platform.OS === 'web') window.alert(`Could not end session: ${error.message}`);
+      else Alert.alert('Could not end session', error.message);
+      return;
+    }
 
-      // If a recording is still running, stop it and wait for
-      // MediaRecorder to actually flush the final Blob before doing
-      // anything else — uploading a half-finalized recording would just
-      // produce a corrupt file. Best-effort only: a failed upload here
-      // shouldn't block the host from actually ending the session, which
-      // is why every step below is wrapped so it can only ever leave
-      // recordingPath null on failure, never throw.
-      let recordingPath = null;
-      if (recording) {
-        try {
-          const blob = await new Promise((resolve) => {
-            recordingStopResolverRef.current = resolve;
-            stopRecording();
-          });
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user && blob.size > 0) {
-            const path = `${user.id}/${session.id}_${Date.now()}.webm`;
-            const { error: uploadError } = await supabase.storage
-              .from('session-recordings')
-              .upload(path, blob, { contentType: 'video/webm' });
-            if (!uploadError) {
-              recordingPath = path;
-              await supabase.from('sessions').update({ recording_path: path }).eq('id', session.id);
-            }
+    // If a recording is still running, stop it and wait for
+    // MediaRecorder to actually flush the final Blob before doing
+    // anything else — uploading a half-finalized recording would just
+    // produce a corrupt file. Best-effort only: a failed upload here
+    // shouldn't block the host from actually ending the session, which
+    // is why every step below is wrapped so it can only ever leave
+    // recordingPath null on failure, never throw.
+    let recordingPath = null;
+    if (recording) {
+      try {
+        const blob = await new Promise((resolve) => {
+          recordingStopResolverRef.current = resolve;
+          stopRecording();
+        });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && blob.size > 0) {
+          const path = `${user.id}/${session.id}_${Date.now()}.webm`;
+          const { error: uploadError } = await supabase.storage
+            .from('session-recordings')
+            .upload(path, blob, { contentType: 'video/webm' });
+          if (!uploadError) {
+            recordingPath = path;
+            await supabase.from('sessions').update({ recording_path: path }).eq('id', session.id);
           }
-        } catch (e) {
-          // Best-effort — see comment above. The host still gets their
-          // summary screen even if the recording upload failed.
         }
+      } catch (e) {
+        // Best-effort — see comment above. The host still gets their
+        // summary screen even if the recording upload failed.
       }
+    }
 
-      // Half of accumulated guest presence-minutes comes out of the
-      // host's own balance — this is the actual cost-recovery
-      // mechanism for guests, since there's no way to bill or cap an
-      // individual guest directly (no account, no identity). Best-
-      // effort: a failed call here shouldn't block ending the session.
-      if (guestMinutesAccumulatorRef.current > 0) {
-        try {
-          await supabase.rpc('apply_guest_minute_penalty', {
-            p_guest_minutes: Math.round(guestMinutesAccumulatorRef.current),
-          });
-        } catch (e) {}
-      }
+    // Half of accumulated guest presence-minutes comes out of the
+    // host's own balance — this is the actual cost-recovery
+    // mechanism for guests, since there's no way to bill or cap an
+    // individual guest directly (no account, no identity). Best-
+    // effort: a failed call here shouldn't block ending the session.
+    if (guestMinutesAccumulatorRef.current > 0) {
+      try {
+        await supabase.rpc('apply_guest_minute_penalty', {
+          p_guest_minutes: Math.round(guestMinutesAccumulatorRef.current),
+        });
+      } catch (e) {}
+    }
 
-      // The periodic tick above already billed every whole minute as it
-      // completed — stop it now and settle only whatever sub-minute
-      // remainder is left (rounded up, so the final partial minute
-      // isn't given away free), instead of re-billing the full duration
-      // from scratch (which would double-charge on top of the ticks).
-      if (hostMinuteTickIntervalRef.current) {
-        clearInterval(hostMinuteTickIntervalRef.current);
-        hostMinuteTickIntervalRef.current = null;
-      }
-      const finalPending = pendingHostMinutesRef.current + (Date.now() - lastHostTickRef.current) / 60000;
-      const finalMinutes = Math.ceil(finalPending);
-      if (finalMinutes > 0) {
-        try {
-          await supabase.rpc('consume_host_minutes', { p_minutes: finalMinutes });
-        } catch (e) {}
-      }
+    // The periodic tick above already billed every whole minute as it
+    // completed — stop it now and settle only whatever sub-minute
+    // remainder is left (rounded up, so the final partial minute
+    // isn't given away free), instead of re-billing the full duration
+    // from scratch (which would double-charge on top of the ticks).
+    if (hostMinuteTickIntervalRef.current) {
+      clearInterval(hostMinuteTickIntervalRef.current);
+      hostMinuteTickIntervalRef.current = null;
+    }
+    const finalPending = pendingHostMinutesRef.current + (Date.now() - lastHostTickRef.current) / 60000;
+    const finalMinutes = Math.ceil(finalPending);
+    if (finalMinutes > 0) {
+      try {
+        await supabase.rpc('consume_host_minutes', { p_minutes: finalMinutes });
+      } catch (e) {}
+    }
 
-      await leaveAgora(); // internally try/caught now — can't block the line above
-      navigation.navigate('EndSession', { session, recordingPath });
-    };
+    await leaveAgora(); // internally try/caught now — can't block the line above
+    navigation.navigate('EndSession', { session, recordingPath });
+  };
 
+  const endSession = () => {
     // react-native-web doesn't reliably render Alert.alert's button array —
     // the confirm UI never appears, so the destructive action (which only
     // ran from inside that button's onPress) silently never fired. Use the
     // browser's own confirm() on web instead; native keeps Alert.alert.
     if (Platform.OS === 'web') {
-      if (window.confirm('End session for everyone?')) proceed();
+      if (window.confirm('End session for everyone?')) endSessionImmediately();
     } else {
       Alert.alert('End session for everyone?', undefined, [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'End session', style: 'destructive', onPress: proceed },
+        { text: 'End session', style: 'destructive', onPress: endSessionImmediately },
       ]);
     }
   };
@@ -1260,12 +1277,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const tools = [
     { icon: muted ? 'mic-off-outline' : 'mic-outline', label: 'Mic', action: toggleMic, active: muted },
     { icon: cameraOff ? 'videocam-off-outline' : 'videocam-outline', label: 'Cam', action: toggleCamera, active: cameraOff },
-    { icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
-    { icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
-    { icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },
-    { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen', { session }) },
-    { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
-    { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
+    ...(modeCaps.agenda ? [{ icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) }] : []),
+    ...(modeCaps.board ? [{ icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode }] : []),
+    ...(modeCaps.poll ? [{ icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 }] : []),
+    { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen', { session, onMinutesExhausted: endSessionImmediately }) },
+    ...(modeCaps.chat ? [{ icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount }] : []),
+    ...(modeCaps.reactions ? [{ icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) }] : []),
+    ...(modeCaps.documents ? [{ icon: 'document-attach-outline', label: 'Docs', action: () => navigation.navigate('DocumentExchangePanel', { session, currentUser: hostUser, isHost: true }) }] : []),
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
     // Free hosts never see this at all — not shown-then-blocked, just
     // absent. isPremium starts false until the profile fetch resolves,
@@ -1635,18 +1653,24 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 ? `Choose a Board to Call ${getAttendeeName(boardPickerTargetUid)} To`
                 : 'Choose a Board'}
             </Text>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.whiteboard} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Whiteboard</Text><Text style={styles.boardPickerDesc}>Clean white canvas with color pens</Text></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('blackboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.blackboard} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Blackboard</Text><Text style={styles.boardPickerDesc}>Classic chalkboard with chalk colors</Text></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('graph')}>
-              <Ionicons name={BOARD_TYPE_ICON.graph} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Graph Board</Text><Text style={styles.boardPickerDesc}>Plot equations, XY values and charts</Text></View>
-            </TouchableOpacity>
+            {modeCaps.boardTypes.includes('whiteboard') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
+                <Ionicons name={BOARD_TYPE_ICON.whiteboard} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Whiteboard</Text><Text style={styles.boardPickerDesc}>Clean white canvas with color pens</Text></View>
+              </TouchableOpacity>
+            )}
+            {modeCaps.boardTypes.includes('blackboard') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('blackboard')}>
+                <Ionicons name={BOARD_TYPE_ICON.blackboard} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Blackboard</Text><Text style={styles.boardPickerDesc}>Classic chalkboard with chalk colors</Text></View>
+              </TouchableOpacity>
+            )}
+            {modeCaps.boardTypes.includes('graph') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('graph')}>
+                <Ionicons name={BOARD_TYPE_ICON.graph} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Graph Board</Text><Text style={styles.boardPickerDesc}>Plot equations, XY values and charts</Text></View>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1732,12 +1756,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
               coHosts[showDropdown]
                 ? { icon: 'star', label: 'Revoke Co-host', color: colors.red, action: () => revokeCoHost(showDropdown) }
                 : { icon: 'star-outline', label: 'Make Co-host', color: colors.white, action: () => grantCoHost(showDropdown) },
-              boardEditors[showDropdown]
-                ? { icon: 'arrow-down-circle-outline', label: 'Uncall from Board', color: colors.red, action: () => revokeFromBoard(showDropdown) }
-                : pendingCallUid === showDropdown
-                  ? { icon: 'hourglass-outline', label: 'Calling…', color: 'rgba(255,255,255,0.4)', action: () => {} }
-                  : { icon: 'create-outline', label: 'Call to Board', color: colors.white, action: () => startCallToBoard(showDropdown) },
-              { icon: 'chatbubble-outline', label: 'Direct Message', color: colors.white, action: () => {
+              ...(modeCaps.board ? [
+                boardEditors[showDropdown]
+                  ? { icon: 'arrow-down-circle-outline', label: 'Uncall from Board', color: colors.red, action: () => revokeFromBoard(showDropdown) }
+                  : pendingCallUid === showDropdown
+                    ? { icon: 'hourglass-outline', label: 'Calling…', color: 'rgba(255,255,255,0.4)', action: () => {} }
+                    : { icon: 'create-outline', label: 'Call to Board', color: colors.white, action: () => startCallToBoard(showDropdown) },
+              ] : []),
+              ...(modeCaps.chat ? [{ icon: 'chatbubble-outline', label: 'Direct Message', color: colors.white, action: () => {
                 chatOpenRef.current = true;
                 navigation.navigate('ChatPanel', {
                   session,
@@ -1748,7 +1774,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     ? { userId: uidToUser[showDropdown].userId, name: uidToUser[showDropdown].name }
                     : null,
                 });
-              } },
+              } }] : []),
              { icon: 'person-remove-outline', label: 'Remove from Session', color: colors.red, action: () => {
   const userInfo = uidToUser[showDropdown];
   const targetUid = showDropdown;

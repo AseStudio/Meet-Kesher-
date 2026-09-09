@@ -8,6 +8,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
+import { getSessionModeCapabilities } from '../../lib/sessionModes';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
@@ -73,6 +74,26 @@ export default function CreateSession({ navigation }) {
   const [hostMinutes, setHostMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
 
+  const modeCaps = getSessionModeCapabilities(selectedMode);
+
+  // Interview mode is hard-capped to 2 people (host + one applicant) at
+  // the database level (see the enforce_interview_capacity trigger) —
+  // this just keeps the UI honest about that instead of letting a host
+  // set "Max Attendees" to 20 and get confused when only one can ever
+  // actually join. Guests are disabled outright for interview: guests
+  // have no session_attendees row (see GuestWaitingScreen.js), so the
+  // DB trigger that enforces the cap can't see or count them — an
+  // "invisible" guest would be an uncounted 3rd person in what's meant
+  // to be a 1-on-1.
+  useEffect(() => {
+    if (modeCaps.maxParticipants) {
+      setMaxAttendees(modeCaps.maxParticipants);
+    }
+    if (!modeCaps.allowGuests) {
+      setAllowGuests(false);
+    }
+  }, [selectedMode]);
+
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -99,6 +120,10 @@ export default function CreateSession({ navigation }) {
   // the backend). Free hosts can't turn this on; paid hosts get an
   // explicit heads-up every time they do, not just once.
   const handleToggleAllowGuests = (next) => {
+    if (next && !modeCaps.allowGuests) {
+      showAlert('Not available in Interview mode', 'Interview sessions are limited to you and one applicant, so guest attendees (who can\u2019t be counted toward that cap) aren\u2019t allowed.');
+      return;
+    }
     if (next && plan === 'free') {
       showAlert(
         'Kesher Premium',
@@ -184,7 +209,7 @@ export default function CreateSession({ navigation }) {
   const advancedSettings = [
     { icon: 'videocam-outline', label: 'Default Camera On', value: cameraOn, onChange: setCameraOn },
     { icon: 'mic-outline', label: 'Default Mic On', value: micOn, onChange: setMicOn },
-    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: handleToggleAllowGuests },
+    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: handleToggleAllowGuests, disabled: !modeCaps.allowGuests },
     { icon: 'musical-notes-outline', label: 'Lobby Music', value: lobbyMusic, onChange: setLobbyMusic },
   ];
 
@@ -243,15 +268,28 @@ export default function CreateSession({ navigation }) {
 
         <View style={styles.attendeeRow}>
           <Text style={styles.label}>Max Attendees</Text>
-          <View style={styles.counterRow}>
-            <TouchableOpacity style={styles.counterBtn} onPress={() => setMaxAttendees(Math.max(1, maxAttendees - 1))} activeOpacity={0.7}>
+          <View style={[styles.counterRow, modeCaps.maxParticipants && { opacity: 0.5 }]}>
+            <TouchableOpacity
+              style={styles.counterBtn}
+              onPress={() => setMaxAttendees(Math.max(1, maxAttendees - 1))}
+              activeOpacity={0.7}
+              disabled={!!modeCaps.maxParticipants}
+            >
               <Ionicons name="remove" size={16} color={palette.ink} />
             </TouchableOpacity>
             <Text style={styles.counterValue}>{maxAttendees}</Text>
-            <TouchableOpacity style={styles.counterBtn} onPress={() => setMaxAttendees(maxAttendees + 1)} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.counterBtn}
+              onPress={() => setMaxAttendees(maxAttendees + 1)}
+              activeOpacity={0.7}
+              disabled={!!modeCaps.maxParticipants}
+            >
               <Ionicons name="add" size={16} color={palette.ink} />
             </TouchableOpacity>
           </View>
+          {modeCaps.maxParticipants ? (
+            <Text style={styles.modeDesc}>Interviews are limited to you and one applicant.</Text>
+          ) : null}
           <View style={styles.waitlistRow}>
             <Text style={styles.waitlistLabel}>Waitlist</Text>
             <Switch value={waitlist} onValueChange={setWaitlist} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
@@ -315,12 +353,12 @@ export default function CreateSession({ navigation }) {
         {showAdvanced && (
           <View style={styles.advancedPanel}>
             {advancedSettings.map((setting, i) => (
-              <View key={i} style={[styles.settingRow, i === advancedSettings.length - 1 && styles.settingRowLast]}>
+              <View key={i} style={[styles.settingRow, i === advancedSettings.length - 1 && styles.settingRowLast, setting.disabled && { opacity: 0.45 }]}>
                 <View style={styles.settingIconWrap}>
                   <Ionicons name={setting.icon} size={16} color={palette.primary} />
                 </View>
                 <Text style={styles.settingLabel}>{setting.label}</Text>
-                <Switch value={setting.value} onValueChange={setting.onChange} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
+                <Switch value={setting.value} onValueChange={setting.onChange} disabled={setting.disabled} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
               </View>
             ))}
           </View>

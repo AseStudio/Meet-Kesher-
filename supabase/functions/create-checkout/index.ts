@@ -65,11 +65,15 @@ serve(async (req) => {
         body: JSON.stringify({
           email: user.email,
           // Required by Paystack's API even when a plan is attached —
-          // but per their own docs, "the amount used to create the plan
+          // and per their own docs, "the amount used to create the plan
           // takes precedence when subscribing to a plan," so this value
-          // is never what actually gets charged. It just has to exist
-          // and clear their minimum (100 kobo).
-          amount: 100,
+          // is never what actually gets charged. It just has to clear
+          // their minimum. That minimum is NGN 100, and amounts are in
+          // kobo (1 Naira = 100 kobo) — so the real floor is 10,000, not
+          // 100. Sending 100 (= ₦1) was the actual bug behind "Invalid
+          // Amount Sent": it satisfied "amount is present" but not
+          // "amount clears the minimum."
+          amount: 10000,
           plan: planCode,
           callback_url: `${APP_URL}/app?upgrade=paystack&plan=${plan}`,
           metadata: { user_id: user.id, plan },
