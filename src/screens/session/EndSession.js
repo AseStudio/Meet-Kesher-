@@ -61,6 +61,17 @@ export default function EndSession({ navigation, route }) {
   const downloadRecording = async () => {
     if (!recordingPath || downloadingRecording) return;
     setDownloadingRecording(true);
+
+    // Same as checkout: open the tab synchronously, inside the tap handler,
+    // so the browser still treats it as user-initiated. Redirect it to the
+    // signed URL once that comes back from the (awaited) Supabase call,
+    // rather than calling window.open after the await — by then the tap
+    // is no longer "current" and Chrome just hands back a blank tab.
+    let recordingTab = null;
+    if (Platform.OS === 'web') {
+      recordingTab = window.open('', '_blank');
+    }
+
     try {
       const { data, error } = await supabase.storage
         .from('session-recordings')
@@ -68,11 +79,16 @@ export default function EndSession({ navigation, route }) {
       if (error) throw error;
 
       if (Platform.OS === 'web') {
-        window.open(data.signedUrl, '_blank');
+        if (recordingTab) {
+          recordingTab.location.href = data.signedUrl;
+        } else {
+          window.open(data.signedUrl, '_blank');
+        }
       } else {
         await Linking.openURL(data.signedUrl);
       }
     } catch (e) {
+      if (recordingTab) recordingTab.close();
       showAlert('Could not open recording', e.message || 'Please try again.');
     } finally {
       setDownloadingRecording(false);

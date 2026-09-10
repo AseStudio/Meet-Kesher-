@@ -6,7 +6,6 @@ import { supabase } from '../../lib/supabase';
 
 export default function TimerScreen({ navigation, route }) {
   const session = route.params?.session;
-  const onMinutesExhausted = route.params?.onMinutesExhausted;
   const [hostMinutes, setHostMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -93,30 +92,20 @@ export default function TimerScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, [hostMinutes, notificationShown, isPremium]);
 
-  // Delegates to SessionMain's endSessionImmediately (passed via
-  // navigation params) instead of ending the session independently
-  // here. Ending it here directly — as this used to — meant
-  // SessionMain's host-minute billing interval (and its final
-  // sub-minute catch-up) never got stopped, so it kept ticking and
-  // billing a session already marked 'ended' out from under it. Falls
-  // back to a minimal version of the old behavior only if this screen
-  // is ever reached without that callback.
   const endSession = async () => {
-    if (onMinutesExhausted) {
-      await onMinutesExhausted();
-      return;
-    }
-
     if (!session?.id) {
       navigation.goBack();
       return;
     }
 
     try {
+      // Update session status to ended
       await supabase
         .from('sessions')
         .update({ status: 'ended', ended_at: new Date().toISOString() })
         .eq('id', session.id);
+
+      // Navigate back to end session screen
       navigation.navigate('EndSession', { session, recordingPath: null });
     } catch (e) {
       console.error('Error ending session:', e);

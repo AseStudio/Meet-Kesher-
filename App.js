@@ -25,7 +25,6 @@ import GuestWaitingScreen from './src/screens/session/GuestWaitingScreen';
 import SessionMain from './src/screens/session/SessionMain';
 import AttendeeSession from './src/screens/session/AttendeeSession';
 import ChatPanel from './src/screens/session/ChatPanel';
-import DocumentExchangePanel from './src/screens/session/DocumentExchangePanel';
 import BoardSelector from './src/screens/session/BoardSelector';
 import Whiteboard from './src/screens/session/Whiteboard';
 import Blackboard from './src/screens/session/Blackboard';
@@ -115,7 +114,6 @@ export default function App() {
           <Stack.Screen name="SessionMain" component={SessionMain} />
           <Stack.Screen name="AttendeeSession" component={AttendeeSession} />
           <Stack.Screen name="ChatPanel" component={withErrorBoundary(ChatPanel)} options={PANEL_ANIMATION} />
-          <Stack.Screen name="DocumentExchangePanel" component={DocumentExchangePanel} options={PANEL_ANIMATION} />
           <Stack.Screen name="BoardSelector" component={BoardSelector} options={PANEL_ANIMATION} />
           <Stack.Screen name="Whiteboard" component={Whiteboard} />
           <Stack.Screen name="Blackboard" component={Blackboard} />

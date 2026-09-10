@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   TextInput, ScrollView, Switch, ActivityIndicator, Platform
@@ -8,7 +8,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-import { getSessionModeCapabilities } from '../../lib/sessionModes';
+import { getPlan, getPlanMaxAttendees } from '../../lib/constants';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
@@ -58,7 +58,15 @@ const generateCode = () => {
 export default function CreateSession({ navigation }) {
   const [title, setTitle] = useState('');
   const [selectedMode, setSelectedMode] = useState('classroom');
-  const [maxAttendees, setMaxAttendees] = useState(50);
+  // Starts at the Free-plan cap since that's the safe default before we
+  // know the host's actual plan; the profile-fetch effect below raises (or
+  // lowers) it once the real plan comes back. `attendeesTouched` stops that
+  // effect from clobbering a value the host has already adjusted by hand.
+  const [maxAttendees, setMaxAttendees] = useState(getPlanMaxAttendees('free'));
+  // Ref, not state: the profile-fetch effect below only runs once on mount
+  // and closes over this value, so a state flag would always read back as
+  // its initial `false` there regardless of what happened after mount.
+  const attendeesTouchedRef = useRef(false);
   const [waitlist, setWaitlist] = useState(true);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -74,33 +82,21 @@ export default function CreateSession({ navigation }) {
   const [hostMinutes, setHostMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
 
-  const modeCaps = getSessionModeCapabilities(selectedMode);
-
-  // Interview mode is hard-capped to 2 people (host + one applicant) at
-  // the database level (see the enforce_interview_capacity trigger) —
-  // this just keeps the UI honest about that instead of letting a host
-  // set "Max Attendees" to 20 and get confused when only one can ever
-  // actually join. Guests are disabled outright for interview: guests
-  // have no session_attendees row (see GuestWaitingScreen.js), so the
-  // DB trigger that enforces the cap can't see or count them — an
-  // "invisible" guest would be an uncounted 3rd person in what's meant
-  // to be a 1-on-1.
-  useEffect(() => {
-    if (modeCaps.maxParticipants) {
-      setMaxAttendees(modeCaps.maxParticipants);
-    }
-    if (!modeCaps.allowGuests) {
-      setAllowGuests(false);
-    }
-  }, [selectedMode]);
-
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data: profile } = await supabase.from('profiles').select('plan, is_premium').eq('id', user.id).maybeSingle();
-      setPlan(profile?.plan || 'free');
+      const nextPlan = profile?.plan || 'free';
+      setPlan(nextPlan);
       setIsPremium(!!profile?.is_premium);
+
+      // Default the counter to this plan's cap so hosts see the most
+      // attendees they can have by default; if they'd already nudged the
+      // counter before this resolved, clamp it down instead of overwriting
+      // their choice outright.
+      const limit = getPlanMaxAttendees(nextPlan);
+      setMaxAttendees((current) => (attendeesTouchedRef.current ? Math.min(current, limit) : limit));
       
       // Fetch hosting minutes balance
       const { data: usageRow } = await supabase.rpc('get_my_usage');
@@ -120,10 +116,6 @@ export default function CreateSession({ navigation }) {
   // the backend). Free hosts can't turn this on; paid hosts get an
   // explicit heads-up every time they do, not just once.
   const handleToggleAllowGuests = (next) => {
-    if (next && !modeCaps.allowGuests) {
-      showAlert('Not available in Interview mode', 'Interview sessions are limited to you and one applicant, so guest attendees (who can\u2019t be counted toward that cap) aren\u2019t allowed.');
-      return;
-    }
     if (next && plan === 'free') {
       showAlert(
         'Kesher Premium',
@@ -148,6 +140,32 @@ export default function CreateSession({ navigation }) {
     }
     setAllowGuests(false);
   };
+
+  const planInfo = getPlan(plan);
+  const attendeeLimit = planInfo.maxAttendees;
+
+  const handleDecrementAttendees = () => {
+    attendeesTouchedRef.current = true;
+    setMaxAttendees((current) => Math.max(1, current - 1));
+  };
+
+  const handleIncrementAttendees = () => {
+    if (maxAttendees >= attendeeLimit) {
+      if (plan !== 'premium') {
+        showAlert(
+          'Attendee Limit Reached',
+          `Your ${planInfo.name} plan allows up to ${attendeeLimit} attendees per session. Upgrade for a higher limit.`,
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'See Plans', onPress: () => navigation.navigate('Upgrade') },
+          ]
+        );
+      }
+      return;
+    }
+    attendeesTouchedRef.current = true;
+    setMaxAttendees((current) => Math.min(attendeeLimit, current + 1));
+  };
   // Purely local UI feedback for the copy buttons below — 'link' | 'code'
   // | null. Was previously missing entirely (the buttons had no onPress
   // at all), so nothing was actually being copied. This doesn't touch
@@ -164,6 +182,13 @@ export default function CreateSession({ navigation }) {
   setError('');
   if (!title.trim()) return setError('Please enter a session title.');
   if (!password.trim()) return setError('Please set a session password.');
+
+  // Belt-and-suspenders: the stepper UI already stops at the plan's cap,
+  // but guard the actual write too in case `plan` and `maxAttendees` ever
+  // fall out of sync (e.g. a downgrade lands mid-session on this screen).
+  if (maxAttendees > attendeeLimit) {
+    return setError(`Your ${planInfo.name} plan allows up to ${attendeeLimit} attendees. Please lower the attendee count or upgrade your plan.`);
+  }
   
   // Check if hosting minutes are exhausted (<= 1 means less than 2)
   if (hostMinutes !== null && hostMinutes <= 1) {
@@ -209,7 +234,7 @@ export default function CreateSession({ navigation }) {
   const advancedSettings = [
     { icon: 'videocam-outline', label: 'Default Camera On', value: cameraOn, onChange: setCameraOn },
     { icon: 'mic-outline', label: 'Default Mic On', value: micOn, onChange: setMicOn },
-    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: handleToggleAllowGuests, disabled: !modeCaps.allowGuests },
+    { icon: 'people-outline', label: 'Allow Guest Users', value: allowGuests, onChange: handleToggleAllowGuests },
     { icon: 'musical-notes-outline', label: 'Lobby Music', value: lobbyMusic, onChange: setLobbyMusic },
   ];
 
@@ -268,33 +293,30 @@ export default function CreateSession({ navigation }) {
 
         <View style={styles.attendeeRow}>
           <Text style={styles.label}>Max Attendees</Text>
-          <View style={[styles.counterRow, modeCaps.maxParticipants && { opacity: 0.5 }]}>
-            <TouchableOpacity
-              style={styles.counterBtn}
-              onPress={() => setMaxAttendees(Math.max(1, maxAttendees - 1))}
-              activeOpacity={0.7}
-              disabled={!!modeCaps.maxParticipants}
-            >
+          <View style={styles.counterRow}>
+            <TouchableOpacity style={styles.counterBtn} onPress={handleDecrementAttendees} activeOpacity={0.7}>
               <Ionicons name="remove" size={16} color={palette.ink} />
             </TouchableOpacity>
             <Text style={styles.counterValue}>{maxAttendees}</Text>
             <TouchableOpacity
-              style={styles.counterBtn}
-              onPress={() => setMaxAttendees(maxAttendees + 1)}
+              style={[styles.counterBtn, maxAttendees >= attendeeLimit && plan === 'premium' && styles.counterBtnDisabled]}
+              onPress={handleIncrementAttendees}
               activeOpacity={0.7}
-              disabled={!!modeCaps.maxParticipants}
             >
-              <Ionicons name="add" size={16} color={palette.ink} />
+              <Ionicons name="add" size={16} color={maxAttendees >= attendeeLimit && plan === 'premium' ? palette.neutralText : palette.ink} />
             </TouchableOpacity>
           </View>
-          {modeCaps.maxParticipants ? (
-            <Text style={styles.modeDesc}>Interviews are limited to you and one applicant.</Text>
-          ) : null}
           <View style={styles.waitlistRow}>
             <Text style={styles.waitlistLabel}>Waitlist</Text>
             <Switch value={waitlist} onValueChange={setWaitlist} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
           </View>
         </View>
+        <Text style={styles.attendeeLimitHint}>
+          Up to {attendeeLimit} on your {planInfo.name} plan
+          {plan !== 'premium' && (
+            <Text style={styles.attendeeLimitLink} onPress={() => navigation.navigate('Upgrade')}> · Upgrade for more</Text>
+          )}
+        </Text>
 
         <Text style={styles.label}>Session Password</Text>
         <View style={styles.inputRow}>
@@ -353,12 +375,12 @@ export default function CreateSession({ navigation }) {
         {showAdvanced && (
           <View style={styles.advancedPanel}>
             {advancedSettings.map((setting, i) => (
-              <View key={i} style={[styles.settingRow, i === advancedSettings.length - 1 && styles.settingRowLast, setting.disabled && { opacity: 0.45 }]}>
+              <View key={i} style={[styles.settingRow, i === advancedSettings.length - 1 && styles.settingRowLast]}>
                 <View style={styles.settingIconWrap}>
                   <Ionicons name={setting.icon} size={16} color={palette.primary} />
                 </View>
                 <Text style={styles.settingLabel}>{setting.label}</Text>
-                <Switch value={setting.value} onValueChange={setting.onChange} disabled={setting.disabled} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
+                <Switch value={setting.value} onValueChange={setting.onChange} trackColor={{ true: palette.primary }} thumbColor={palette.surface} />
               </View>
             ))}
           </View>
@@ -424,9 +446,12 @@ const styles = StyleSheet.create({
   attendeeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
   counterRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: palette.surface, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: palette.line, ...cardShadow },
   counterBtn: { width: 28, height: 28, borderRadius: 9, backgroundColor: palette.neutralSoft, alignItems: 'center', justifyContent: 'center' },
+  counterBtnDisabled: { opacity: 0.5 },
   counterValue: { fontSize: 16, fontWeight: '800', color: palette.ink, minWidth: 30, textAlign: 'center' },
   waitlistRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   waitlistLabel: { fontSize: 13, fontWeight: '700', color: palette.ink },
+  attendeeLimitHint: { fontSize: 11.5, color: palette.inkMuted, fontWeight: '600', marginTop: 6 },
+  attendeeLimitLink: { color: palette.primary, fontWeight: '700' },
 
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface, borderRadius: 13, paddingHorizontal: 14, borderWidth: 1, borderColor: palette.line, height: 52, ...cardShadow },
   inputIcon: { marginRight: 10 },
