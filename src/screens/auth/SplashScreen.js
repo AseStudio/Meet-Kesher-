@@ -82,7 +82,14 @@ const routeBasedOnSession = async () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('upgrade') === 'paystack') {
-        navigation.replace('ConfirmingPayment', { plan: params.get('plan') });
+        const plan = params.get('plan');
+        // Nothing downstream needs the raw query string once `plan` is
+        // captured into route params below — strip it now so
+        // ?upgrade=paystack&plan=...&trxref=...&reference=... doesn't sit
+        // in the address bar for the rest of the session. replaceState
+        // (not pushState) so this doesn't add a spare history entry either.
+        window.history.replaceState(null, '', window.location.pathname);
+        navigation.replace('ConfirmingPayment', { plan });
         return;
       }
     }

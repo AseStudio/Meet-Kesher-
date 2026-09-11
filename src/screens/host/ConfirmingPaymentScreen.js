@@ -28,6 +28,14 @@ export default function ConfirmingPaymentScreen({ navigation, route }) {
   const [status, setStatus] = useState('confirming'); // 'confirming' | 'success' | 'timeout'
   const attemptsRef = useRef(0);
   const pollRef = useRef(null);
+  // Paystack's redirect is a real full-page reload, so by the time this
+  // screen mounts the entire in-memory navigation stack is gone — there's
+  // no "came from HostDashboard vs AttendeeDashboard" context left to fall
+  // back on. Upgrade is reachable from both (Profile, CreateSession,
+  // Community, and an in-session upsell), so the role has to be looked up
+  // fresh here rather than assumed, or an attendee landing on this screen
+  // would get reset into a host dashboard they can't actually use.
+  const roleRef = useRef(null);
 
   useEffect(() => {
     const poll = async () => {
@@ -37,7 +45,8 @@ export default function ConfirmingPaymentScreen({ navigation, route }) {
         if (!user) return;
 
         const { data: profile } = await supabase
-          .from('profiles').select('plan').eq('id', user.id).maybeSingle();
+          .from('profiles').select('plan, role').eq('id', user.id).maybeSingle();
+        roleRef.current = profile?.role || roleRef.current;
 
         // Accept any real upgrade away from free as success, not only an
         // exact match to targetPlan — if the webhook and this screen
@@ -66,7 +75,15 @@ export default function ConfirmingPaymentScreen({ navigation, route }) {
   }, []);
 
   const goToProfile = () => {
-    navigation.reset({ index: 0, routes: [{ name: 'Profile' }] });
+    // Rebuild the stack as [Dashboard, Profile] rather than resetting to
+    // Profile alone — a bare [Profile] stack leaves nothing for back
+    // navigation (hardware/browser back, or an in-app back arrow) to land
+    // on. Defaults to HostDashboard if the role lookup above never
+    // resolved (e.g. every poll attempt hit a transient error) — hosts are
+    // still the more common path into checkout, and either dashboard beats
+    // a dead-end back button.
+    const dashboardRoute = roleRef.current === 'attendee' ? 'AttendeeDashboard' : 'HostDashboard';
+    navigation.reset({ index: 1, routes: [{ name: dashboardRoute }, { name: 'Profile' }] });
   };
 
   return (
