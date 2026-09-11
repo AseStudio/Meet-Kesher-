@@ -27,6 +27,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// supabase-js's functions.invoke() decides how to parse the response body
+// purely from the Content-Type header — application/json gets response.json(),
+// anything else (including no header at all) falls back to response.text().
+// Deno's Response constructor does NOT infer application/json from a JSON
+// string body; a bare string defaults to text/plain. Every JSON response
+// below must set this explicitly, or the client receives the raw JSON
+// string instead of a parsed object (data.url on a string is undefined,
+// which is exactly what was sending hosts to /undefined on checkout).
+const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -44,12 +54,12 @@ serve(async (req) => {
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401, headers: jsonHeaders });
     }
 
     const { processor, plan } = await req.json();
     if (!['pro', 'max', 'premium'].includes(plan)) {
-      return new Response(JSON.stringify({ error: 'Invalid plan' }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'Invalid plan' }), { status: 400, headers: jsonHeaders });
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -82,7 +92,7 @@ serve(async (req) => {
       const data = await res.json();
 
       if (!data.status) {
-        return new Response(JSON.stringify({ error: data.message || 'Could not start checkout' }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: data.message || 'Could not start checkout' }), { status: 400, headers: jsonHeaders });
       }
 
       // Recorded as 'pending' immediately — the webhook flips this to
@@ -98,21 +108,21 @@ serve(async (req) => {
         processor_subscription_id: data.data.reference,
       });
 
-      return new Response(JSON.stringify({ url: data.data.authorization_url }), { headers: corsHeaders });
+      return new Response(JSON.stringify({ url: data.data.authorization_url }), { headers: jsonHeaders });
     }
 
     if (processor === 'stripe') {
       const priceId = STRIPE_PRICES[plan];
       if (!priceId) {
-        return new Response(JSON.stringify({ error: 'Stripe checkout isn\'t configured yet — send the Price IDs to finish wiring this up.' }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: 'Stripe checkout isn\'t configured yet — send the Price IDs to finish wiring this up.' }), { status: 400, headers: jsonHeaders });
       }
       // TODO: real Stripe Checkout Session creation goes here once
       // STRIPE_PRICES above is filled in.
-      return new Response(JSON.stringify({ error: 'Stripe checkout not yet implemented.' }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'Stripe checkout not yet implemented.' }), { status: 400, headers: jsonHeaders });
     }
 
-    return new Response(JSON.stringify({ error: 'Unknown processor' }), { status: 400, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: 'Unknown processor' }), { status: 400, headers: jsonHeaders });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: jsonHeaders });
   }
 });
