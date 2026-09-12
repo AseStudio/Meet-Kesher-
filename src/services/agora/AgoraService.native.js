@@ -125,6 +125,20 @@ export function createAgoraSession(handlers = {}) {
       }
     },
 
+    // Not implemented on native. Real device screen capture needs a
+    // foreground service + MediaProjection on Android and a broadcast
+    // extension target on iOS — actual native-module/Xcode-project work,
+    // not something this JS layer can add on its own. Always resolving
+    // false (never throwing) lets SessionMain treat "not available here"
+    // the same way it treats "person cancelled the share picker" on web —
+    // though in practice SessionMain hides the Share button entirely on
+    // native rather than calling this at all.
+    async startScreenShare() {
+      console.log('Screen share is not yet implemented on native — web only for now.');
+      return false;
+    },
+    async stopScreenShare() {},
+
     async leave() {
       try {
         engine?.leaveChannel();

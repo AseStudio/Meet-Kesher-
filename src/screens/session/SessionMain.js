@@ -45,6 +45,7 @@ export default function SessionMain({ navigation, route }) {
   // Video states
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
   const [recording, setRecording] = useState(false);
   // Recording is a Premium perk, and only works on desktop-class web
@@ -682,6 +683,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
         );
         applyVideoProfile(key);
       },
+      // Fires when the host stops sharing via the browser/OS's own
+      // "Stop sharing" control rather than tapping our toolbar button —
+      // the only way this screen otherwise finds out sharing ended.
+      onScreenShareEnded: () => {
+        setScreenSharing(false);
+        setLocalVideoTrack(agoraSession.getLocalVideoRef());
+      },
     });
     agoraSessionRef.current = agoraSession;
 
@@ -746,6 +754,29 @@ function getProfileKey(uplink = 0, downlink = 0) {
       await agoraSessionRef.current?.setVideoEnabled(cameraOff);
       setCameraOff(prev => !prev);
     } catch (e) { console.log('Camera error:', e.message); }
+  };
+
+  const toggleScreenShare = async () => {
+    try {
+      if (screenSharing) {
+        await agoraSessionRef.current?.stopScreenShare();
+        setScreenSharing(false);
+      } else {
+        const started = await agoraSessionRef.current?.startScreenShare();
+        // false means the person cancelled the OS/browser share picker
+        // (or, on native, screen share isn't implemented at all) — not
+        // an error, just no state change to make.
+        if (!started) return;
+        setScreenSharing(true);
+      }
+      // Local preview needs to switch between the camera and screen
+      // track either way — getLocalVideoRef() already reflects whichever
+      // is actually live now.
+      setLocalVideoTrack(agoraSessionRef.current?.getLocalVideoRef());
+    } catch (e) {
+      console.log('Screen share error:', e.message);
+      Alert.alert('Screen Share', e.message || "Couldn't start screen sharing.");
+    }
   };
 
   // ─── BOARD CONTROL ───
@@ -1260,6 +1291,10 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const tools = [
     { icon: muted ? 'mic-off-outline' : 'mic-outline', label: 'Mic', action: toggleMic, active: muted },
     { icon: cameraOff ? 'videocam-off-outline' : 'videocam-outline', label: 'Cam', action: toggleCamera, active: cameraOff },
+    // Web only — native has no screen-capture implementation yet (see
+    // AgoraService.native.js), so rather than show a button that always
+    // silently no-ops there, it just doesn't exist on that platform.
+    ...(Platform.OS === 'web' ? [{ icon: screenSharing ? 'stop-circle-outline' : 'desktop-outline', label: 'Share', action: toggleScreenShare, active: screenSharing }] : []),
     { icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
     { icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
     { icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },

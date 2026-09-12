@@ -28,6 +28,9 @@
  *   onUserLeft(uid),
  *   onVolumeIndicator(volumes),                  // same shape as web SDK gives today
  *   onNetworkQuality(stats),                     // { uplinkNetworkQuality, downlinkNetworkQuality }
+ *   onScreenShareEnded(),                        // fired ONLY when the browser/OS's own
+ *                                                 // "Stop sharing" control ends it, never
+ *                                                 // for the app's own stopScreenShare() call
  * }
  *
  * session methods (all async unless noted):
@@ -40,6 +43,37 @@
  *   leave()                             // leave channel + release all local tracks/engine
  *   getLocalVideoRef() -> ref            // opaque; pass straight into <VideoTile videoRef={...} />
  *   getRemoteVideoRef(uid) -> ref        // opaque; pass into <VideoTile videoRef={...} />
+ *
+ *   startScreenShare() -> boolean        // true if sharing actually started.
+ *                                        // false means the person cancelled
+ *                                        // the OS/browser picker, or (native)
+ *                                        // screen share isn't implemented —
+ *                                        // callers should treat false as "no
+ *                                        // state change", not an error.
+ *   stopScreenShare()                    // safe to call even if not sharing
+ *
+ * SCREEN SHARE SEMANTICS:
+ * Screen share REPLACES the published camera video track, it doesn't add
+ * a second video stream — Agora's free/starter tiers only support one
+ * video track per uid, and remote viewers already only ever render one
+ * video per participant (see VideoTile). getLocalVideoRef() reflects
+ * whichever is currently live (camera or screen) so callers just re-read
+ * it after start/stopScreenShare() resolves rather than tracking two refs.
+ *
+ * The person can stop sharing two ways: the app's own toggle button, OR
+ * the browser/OS's own native "Stop sharing" control — the latter fires
+ * asynchronously with no app-side call at all. Implementations MUST call
+ * handlers.onScreenShareEnded?.() in that case so the screen knows to
+ * flip its toggle button back and re-fetch getLocalVideoRef() to restore
+ * the camera preview. stopScreenShare() called by the app itself does
+ * NOT need to (and by convention doesn't) also fire onScreenShareEnded —
+ * that would just be the caller re-notifying itself of its own action.
+ *
+ * Native has no screen-share implementation yet (it needs a foreground
+ * service on Android and a broadcast extension on iOS — real native
+ * module work, not something addable from the JS side alone). Its
+ * startScreenShare() always resolves false; SessionMain hides the button
+ * entirely on native rather than showing one that silently no-ops.
  *
  * IMPORTANT SEMANTIC THIS PRESERVES FROM AttendeeSession.js:
  * initAgora() there deliberately does NOT publish a track it's about to

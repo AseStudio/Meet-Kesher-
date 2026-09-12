@@ -2,7 +2,13 @@ import React, { useEffect, useRef } from 'react';
 import { View, Platform } from 'react-native';
 import { loadAdSenseScript } from '../lib/adsense';
 
+// This must match the AdSense "Sites" entry for kesher.vercel.app exactly
+// (pub-1258194158404497) — a mismatched publisher ID here means every ad
+// request goes out under an account that was never verified for this
+// domain, so Google has no reason to ever fill it, independent of
+// anything else (Content-Type headers, ads.txt, review status, etc.).
 const ADSENSE_CLIENT = 'ca-pub-1258194158404497';
+// Real ad unit created under pub-1258194158404497 (the correct account).
 const ADSENSE_SLOT = '1239291941';
 const ADSENSE_LAYOUT_KEY = '-6t+ed+2i-1n-4w';
 

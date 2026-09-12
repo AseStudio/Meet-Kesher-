@@ -18,6 +18,16 @@ export function createAgoraSession(handlers = {}) {
   // uid -> Agora's remote user object (has .videoTrack/.audioTrack with .play(el))
   const remoteUsers = new Map();
 
+  // Screen share state. `cameraWasPublished`/`cameraWasEnabled` capture
+  // exactly how the camera track looked the instant sharing started, so
+  // stopping restores it faithfully — if the camera was off before
+  // sharing, it comes back off, not on.
+  let screenVideoTrack = null;
+  let screenAudioTrack = null; // only set if the person shared a tab "with audio"
+  let sharingScreen = false;
+  let cameraWasPublished = false;
+  let cameraWasEnabled = false;
+
   const createClient = () => AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
   // Split into two independent calls (instead of the old single
@@ -161,8 +171,76 @@ export function createAgoraSession(handlers = {}) {
       }
     },
 
+    async startScreenShare() {
+      if (sharingScreen) return true; // already sharing — no-op success
+      let tracks;
+      try {
+        // 'auto' lets the browser's own share picker decide whether tab
+        // audio is offered (only tab-sharing supports it; whole-screen/
+        // window sharing never does) — this can resolve to either a lone
+        // video track or [video, audio], hence the array-or-not handling
+        // below.
+        tracks = await AgoraRTC.createScreenVideoTrack({ encoderConfig: '1080p_1' }, 'auto');
+      } catch (err) {
+        // The most common case by far is the person just closing the OS
+        // share picker instead of choosing something — NotAllowedError.
+        // That's a cancellation, not a real error, so it's swallowed here
+        // and reported as "didn't start" rather than surfaced as a crash.
+        console.log('Screen share not started (picker cancelled or denied):', err.message);
+        return false;
+      }
+      [screenVideoTrack, screenAudioTrack] = Array.isArray(tracks) ? tracks : [tracks, null];
+
+      // Fires when the person uses the browser/OS's OWN "Stop sharing"
+      // control (the little bar Chrome shows), not our button — this is
+      // the only way we find out sharing ended in that case.
+      screenVideoTrack.on('track-ended', async () => {
+        if (!sharingScreen) return; // already handled via our own stopScreenShare()
+        await this.stopScreenShare();
+        handlers.onScreenShareEnded?.();
+      });
+
+      cameraWasPublished = videoPublished;
+      cameraWasEnabled = !!localVideoTrack?.enabled;
+
+      if (cameraWasPublished && localVideoTrack) {
+        try { await client.unpublish(localVideoTrack); } catch (e) {}
+      }
+      const toPublish = screenAudioTrack ? [screenVideoTrack, screenAudioTrack] : [screenVideoTrack];
+      await client.publish(toPublish);
+      sharingScreen = true;
+      return true;
+    },
+
+    async stopScreenShare() {
+      if (!sharingScreen) return;
+      try { await client?.unpublish(screenAudioTrack ? [screenVideoTrack, screenAudioTrack] : [screenVideoTrack]); } catch (e) {}
+      screenVideoTrack?.close();
+      screenAudioTrack?.close();
+      screenVideoTrack = null;
+      screenAudioTrack = null;
+      sharingScreen = false;
+
+      // Restore the camera to exactly how it looked before sharing
+      // started, rather than always turning it back on.
+      if (cameraWasPublished && localVideoTrack) {
+        await localVideoTrack.setEnabled(cameraWasEnabled);
+        try {
+          await client.publish([localVideoTrack]);
+          videoPublished = true;
+        } catch (e) {}
+      }
+    },
+
     async leave() {
       try {
+        if (sharingScreen) {
+          screenVideoTrack?.close();
+          screenAudioTrack?.close();
+          screenVideoTrack = null;
+          screenAudioTrack = null;
+          sharingScreen = false;
+        }
         if (client) {
           await client.leave();
           client.removeAllListeners();
@@ -179,9 +257,12 @@ export function createAgoraSession(handlers = {}) {
     },
 
     // Opaque refs — VideoTile.web.js knows these are Agora web tracks
-    // and calls track.play(domNode) with them.
+    // and calls track.play(domNode) with them. While sharing, this
+    // returns the screen track instead of the camera track — callers
+    // just re-read it after start/stopScreenShare() resolves rather than
+    // tracking two separate refs (see contract doc).
     getLocalVideoRef() {
-      return localVideoTrack;
+      return sharingScreen ? screenVideoTrack : localVideoTrack;
     },
     getRemoteVideoRef(uid) {
       return remoteUsers.get(uid)?.videoTrack || null;
