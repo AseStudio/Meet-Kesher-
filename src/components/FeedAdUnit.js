@@ -2,9 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { View, Platform } from 'react-native';
 import { loadAdSenseScript } from '../lib/adsense';
 
-const ADSENSE_CLIENT = 'ca-pub-8987252550268346';
-const ADSENSE_SLOT = '3047768455';
-const ADSENSE_LAYOUT_KEY = '-6c+du+k-3x+d5';
+const ADSENSE_CLIENT = 'ca-pub-1258194158404497';
+const ADSENSE_SLOT = '1239291941';
+const ADSENSE_LAYOUT_KEY = '-6t+ed+2i-1n-4w';
 
 // Web-only — AdSense has no native/mobile-app SDK at all (that's what
 // AdMob is for, a separate product, not yet wired in). Native falls
