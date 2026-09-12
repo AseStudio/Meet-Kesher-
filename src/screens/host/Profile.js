@@ -370,8 +370,20 @@ export default function Profile({ navigation }) {
           )}
         </View>
 
-        {/* Subscription */}
-        <View style={styles.subscriptionCard}>
+        {/* Subscription — the whole card is tappable now, not just a
+            button that only exists for free users. Paid plans used to
+            render *no* way back into Upgrade here at all once the old
+            free-only button disappeared, leaving "Subscription & Billing"
+            in Settings (several scrolls down) as the only surviving path.
+            A "Manage" affordance now always sits in its place instead. */}
+        <TouchableOpacity
+          style={[
+            styles.subscriptionCard,
+            profile?.plan && profile.plan !== 'free' && styles.subscriptionCardPremium,
+          ]}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Upgrade')}
+        >
           <View style={styles.subLeft}>
             <View style={[styles.subIconWrap, profile?.plan && profile.plan !== 'free' && styles.subIconWrapPremium]}>
               <Ionicons
@@ -389,17 +401,18 @@ export default function Profile({ navigation }) {
               </Text>
             </View>
           </View>
-          {(!profile?.plan || profile.plan === 'free') && (
-            <TouchableOpacity
-              style={styles.upgradeBtn}
-              activeOpacity={0.85}
-              onPress={() => navigation.navigate('Upgrade')}
-            >
+          {profile?.plan && profile.plan !== 'free' ? (
+            <View style={styles.manageBtn}>
+              <Text style={styles.manageBtnText}>Manage</Text>
+              <Ionicons name="chevron-forward" size={15} color={themePalette.premium} />
+            </View>
+          ) : (
+            <View style={styles.upgradeBtn}>
               <Text style={styles.upgradeBtnText}>Upgrade</Text>
               <Ionicons name="sparkles" size={13} color={themePalette.surface} />
-            </TouchableOpacity>
+            </View>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* Minutes left this month */}
         {usage && (
@@ -573,12 +586,22 @@ const getStyles = (themePal, cardShadow) => StyleSheet.create({
     backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 16,
     borderRadius: 17, padding: 16, ...cardShadow,
   },
+  // Paid plans get a soft lavender wash instead of the plain white shell —
+  // a small, low-effort way to make "you're on a paid plan" read as a
+  // small reward rather than a card that's visually identical to free.
+  subscriptionCardPremium: { backgroundColor: themePal.premiumSoft, borderWidth: 1, borderColor: 'rgba(124,58,237,0.15)' },
   subLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   subIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: themePal.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  subIconWrapPremium: { backgroundColor: themePal.premiumSoft },
+  // A plain white circle here (rather than another purple tint) is what
+  // actually gives it contrast now that the card itself is lavender —
+  // reusing premiumSoft for both would make the icon disappear into the
+  // background it's meant to sit on top of.
+  subIconWrapPremium: { backgroundColor: themePal.surface },
   subTextWrap: { flex: 1 },
   subPlan: { fontSize: 14.5, fontWeight: '700', color: themePal.ink },
   subDesc: { fontSize: 11.5, color: themePal.inkMuted, marginTop: 2, fontWeight: '500' },
+  manageBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.65)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 11 },
+  manageBtnText: { color: themePal.premium, fontWeight: '700', fontSize: 12.5 },
 
   // ── Usage ──
   usageCard: {

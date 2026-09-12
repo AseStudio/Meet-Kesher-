@@ -12,7 +12,7 @@ import VideoTile from '../../components/VideoTile';
 import WhiteboardCanvas from '../../components/WhiteboardCanvas';
 import GraphBoardCanvas from '../../components/GraphboardCanvas'; // note: file is "Graphboard" not "GraphBoard"
 import NotificationToastStack from '../../components/NotificationToast';
-import { ModeIcon, SIGNAL_ICON } from '../../lib/iconMeta';
+import { ModeIcon, SIGNAL_ICON, getModeColor } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -856,8 +856,8 @@ export default function AttendeeSession({ navigation, route }) {
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
-            <ModeIcon mode={session?.mode} size={scale(11)} color={colors.white} />
-            <Text style={styles.modeBadgeText}>{session?.mode || 'Session'}</Text>
+            <ModeIcon mode={session?.mode} size={scale(11)} color={getModeColor(session?.mode)} />
+            <Text style={[styles.modeBadgeText, { color: getModeColor(session?.mode) }]}>{session?.mode || 'Session'}</Text>
           </View>
           {isCoHost && (
             <View style={styles.coHostChip}>

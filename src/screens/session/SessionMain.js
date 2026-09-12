@@ -12,7 +12,7 @@ import VideoTile from '../../components/VideoTile';
 import WhiteboardCanvas from '../../components/WhiteboardCanvas'; // adjust path if these live elsewhere
 import GraphBoardCanvas from '../../components/GraphboardCanvas';
 import NotificationToastStack from '../../components/NotificationToast';
-import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON } from '../../lib/iconMeta';
+import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON, getModeColor } from '../../lib/iconMeta';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 import { showAlert } from '../../lib/alert';
@@ -1332,8 +1332,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
         <View>
           <Text style={styles.sessionTitle}>{session?.title || 'Session'}</Text>
           <View style={styles.modeBadge}>
-            <ModeIcon mode={session?.mode} size={11} color={colors.white} />
-            <Text style={styles.modeBadgeText}>{session?.mode || 'Session'}</Text>
+            <ModeIcon mode={session?.mode} size={11} color={getModeColor(session?.mode)} />
+            <Text style={[styles.modeBadgeText, { color: getModeColor(session?.mode) }]}>{session?.mode || 'Session'}</Text>
           </View>
         </View>
         <View style={styles.topRight}>

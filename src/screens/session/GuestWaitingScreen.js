@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
-import { ModeIcon } from '../../lib/iconMeta';
+import { ModeIcon, getModeColor } from '../../lib/iconMeta';
 import EnteringSessionTransition from '../../components/EnteringSessionTransition';
 
 // Same deliberate hold LobbyScreen uses before swapping into the live
@@ -27,6 +27,11 @@ const ENTER_SESSION_DELAY_MS = 3000;
 export default function GuestWaitingScreen({ navigation, route }) {
   const session = route.params?.session;
   const guest = route.params?.guest || null;
+  // Everything below (hourglass, pulse ring, mode badge, status dot) was
+  // hardcoded to colors.primary regardless of which mode was actually
+  // picked in Create Session — this makes the whole waiting screen match
+  // that mode instead of always looking like classroom.
+  const modeColor = getModeColor(session?.mode);
 
   const [entering, setEntering] = useState(false);
   const enteringRef = useRef(false);
@@ -103,8 +108,8 @@ export default function GuestWaitingScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <View style={styles.iconWrap}>
-        <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
-        <Ionicons name="hourglass-outline" size={40} color={colors.primary} />
+        <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity, backgroundColor: modeColor }]} />
+        <Ionicons name="hourglass-outline" size={40} color={modeColor} />
       </View>
 
       <Text style={styles.title}>Waiting for the Host</Text>
@@ -116,8 +121,8 @@ export default function GuestWaitingScreen({ navigation, route }) {
       {session?.title ? (
         <View style={styles.sessionCard}>
           <View style={styles.sessionCardTop}>
-            <ModeIcon mode={session?.mode} size={13} color={colors.primary} />
-            <Text style={styles.sessionMode}>{session?.mode || 'Session'}</Text>
+            <ModeIcon mode={session?.mode} size={13} color={modeColor} />
+            <Text style={[styles.sessionMode, { color: modeColor }]}>{session?.mode || 'Session'}</Text>
           </View>
           <Text style={styles.sessionTitle}>{session.title}</Text>
           {guest?.name ? <Text style={styles.sessionGuest}>Joining as {guest.name}</Text> : null}
@@ -125,7 +130,7 @@ export default function GuestWaitingScreen({ navigation, route }) {
       ) : null}
 
       <View style={styles.statusRow}>
-        <View style={styles.statusDot} />
+        <View style={[styles.statusDot, { backgroundColor: modeColor }]} />
         <Text style={styles.statusText}>In the lobby — still waiting for the host</Text>
       </View>
     </View>

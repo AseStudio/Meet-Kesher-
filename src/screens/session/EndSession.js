@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
+import { ModeIcon, getModeColor, getModeSoft } from '../../lib/iconMeta';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens.
@@ -27,21 +28,6 @@ const palette = {
   neutralSoft: colors.greyLight,
   neutralText: colors.grey,
 };
-
-// Same mode → icon mapping used across CreateSession / the dashboards /
-// Lobby / AttendeeSession.
-const MODE_ICON_META = {
-  classroom:   { icon: 'school-outline',    set: 'ion' },
-  interview:   { icon: 'briefcase-outline', set: 'ion' },
-  meeting:     { icon: 'people-outline',    set: 'ion' },
-  gettogether: { icon: 'party-popper',      set: 'mci' },
-};
-const DEFAULT_MODE_ICON = { icon: 'calendar-outline', set: 'ion' };
-function ModeIcon({ mode, size = 17, color = palette.primary }) {
-  const meta = MODE_ICON_META[mode] || DEFAULT_MODE_ICON;
-  const IconSet = meta.set === 'mci' ? MaterialCommunityIcons : Ionicons;
-  return <IconSet name={meta.icon} size={size} color={color} />;
-}
 
 export default function EndSession({ navigation, route }) {
   const session = route.params?.session;
@@ -162,11 +148,18 @@ export default function EndSession({ navigation, route }) {
         <View style={styles.summaryCard}>
           {summaryRows.map((row, i) => (
             <View key={i} style={[styles.summaryRow, i === summaryRows.length - 1 && styles.summaryRowLast]}>
-              <View style={styles.summaryIconWrap}>
+              <View style={[styles.summaryIconWrap, row.mode && { backgroundColor: getModeSoft(session?.mode) }]}>
                 {row.mode ? <ModeIcon mode={session?.mode} size={16} /> : <Ionicons name={row.icon} size={16} color={palette.primary} />}
               </View>
               <Text style={styles.summaryLabel}>{row.label}</Text>
-              <Text style={[styles.summaryValue, row.accent && { color: palette.primary }, row.mode && { textTransform: 'capitalize' }]} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.summaryValue,
+                  row.accent && { color: palette.primary },
+                  row.mode && { color: getModeColor(session?.mode), textTransform: 'capitalize' },
+                ]}
+                numberOfLines={1}
+              >
                 {row.value}
               </Text>
             </View>

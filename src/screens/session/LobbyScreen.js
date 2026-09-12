@@ -38,21 +38,7 @@ const palette = {
   neutralText: colors.grey,
 };
 
-// Same mode → icon mapping used on CreateSession / the dashboards /
-// AttendeeSession, so a session's mode badge looks identical everywhere
-// it shows up across the app.
-const MODE_ICON_META = {
-  classroom:   { icon: 'school-outline',    set: 'ion' },
-  interview:   { icon: 'briefcase-outline', set: 'ion' },
-  meeting:     { icon: 'people-outline',    set: 'ion' },
-  gettogether: { icon: 'party-popper',      set: 'mci' },
-};
-const DEFAULT_MODE_ICON = { icon: 'calendar-outline', set: 'ion' };
-function ModeIcon({ mode, size = 13, color = palette.surface }) {
-  const meta = MODE_ICON_META[mode] || DEFAULT_MODE_ICON;
-  const IconSet = meta.set === 'mci' ? MaterialCommunityIcons : Ionicons;
-  return <IconSet name={meta.icon} size={size} color={color} />;
-}
+import { getModeColor, getModeSoft, ModeIcon } from '../../lib/iconMeta';
 
 const MUSIC_TRACKS = [
   { id: 1, name: 'Calm Lounge', icon: 'piano', set: 'mci', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
@@ -80,6 +66,12 @@ const getSharedSeconds = (createdAt) => {
 
 export default function LobbyScreen({ navigation, route }) {
   const session = route.params?.session;
+  // Drives every mode-themed accent below (badge, waiting card, capacity
+  // bar, track picker, Start button) — falls back to classroom's blue/
+  // purple via getModeColor's own default when session/mode isn't loaded
+  // yet, so nothing flashes an unstyled color while this screen mounts.
+  const modeColor = getModeColor(session?.mode);
+  const modeSoft = getModeSoft(session?.mode);
   // Forwarded straight through to AttendeeSession once the session goes
   // live — without this, a guest arrives with no `guest` param and
   // AttendeeSession's isGuest check silently defaults to false, sending
@@ -500,7 +492,7 @@ export default function LobbyScreen({ navigation, route }) {
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.sessionTitle}>{session?.title || 'Loading...'}</Text>
-            <View style={styles.modeBadge}>
+            <View style={[styles.modeBadge, { backgroundColor: modeColor }]}>
               <ModeIcon mode={session?.mode} size={12} color={palette.surface} />
               <Text style={styles.modeBadgeText}>{session?.mode}</Text>
             </View>
@@ -508,23 +500,23 @@ export default function LobbyScreen({ navigation, route }) {
           <View style={styles.codeArea}>
             <View style={styles.codeBadge}>
               <Text style={styles.codeLabel}>Code</Text>
-              <Text style={styles.codeValue}>{session?.code}</Text>
+              <Text style={[styles.codeValue, { color: modeColor }]}>{session?.code}</Text>
             </View>
             <TouchableOpacity
               style={[styles.copyBtn, copiedField === 'code' && styles.copyBtnDone]}
               onPress={() => copyToClipboard(session?.code || '', 'code')}
               activeOpacity={0.75}
             >
-              <Ionicons name={copiedField === 'code' ? 'checkmark' : 'copy-outline'} size={15} color={copiedField === 'code' ? palette.success : palette.primary} />
-              <Text style={[styles.copyBtnText, copiedField === 'code' && { color: palette.success }]}>{copiedField === 'code' ? 'Copied' : 'Copy'}</Text>
+              <Ionicons name={copiedField === 'code' ? 'checkmark' : 'copy-outline'} size={15} color={copiedField === 'code' ? palette.success : modeColor} />
+              <Text style={[styles.copyBtnText, { color: modeColor }, copiedField === 'code' && { color: palette.success }]}>{copiedField === 'code' ? 'Copied' : 'Copy'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.copyBtn, copiedField === 'link' && styles.copyBtnDone]}
               onPress={() => copyToClipboard(getSessionJoinLink(session?.code), 'link')}
               activeOpacity={0.75}
             >
-              <Ionicons name={copiedField === 'link' ? 'checkmark' : 'link-outline'} size={15} color={copiedField === 'link' ? palette.success : palette.primary} />
-              <Text style={[styles.copyBtnText, copiedField === 'link' && { color: palette.success }]}>{copiedField === 'link' ? 'Copied' : 'Link'}</Text>
+              <Ionicons name={copiedField === 'link' ? 'checkmark' : 'link-outline'} size={15} color={copiedField === 'link' ? palette.success : modeColor} />
+              <Text style={[styles.copyBtnText, { color: modeColor }, copiedField === 'link' && { color: palette.success }]}>{copiedField === 'link' ? 'Copied' : 'Link'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -569,13 +561,13 @@ export default function LobbyScreen({ navigation, route }) {
 
         {/* Waiting card for attendees */}
         {!isHost && (
-          <View style={styles.waitingCard}>
-            <ActivityIndicator size="small" color={palette.primary} />
+          <View style={[styles.waitingCard, { backgroundColor: modeSoft, borderColor: modeColor }]}>
+            <ActivityIndicator size="small" color={modeColor} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.waitingTitle}>Waiting for host...</Text>
+              <Text style={[styles.waitingTitle, { color: modeColor }]}>Waiting for host...</Text>
               <View style={styles.waitingNoteRow}>
                 <Text style={styles.waitingNote}>You'll move in automatically when the session begins</Text>
-                <Ionicons name="rocket-outline" size={13} color={palette.primary} />
+                <Ionicons name="rocket-outline" size={13} color={modeColor} />
               </View>
             </View>
           </View>
@@ -587,7 +579,7 @@ export default function LobbyScreen({ navigation, route }) {
           <View style={styles.colCard}>
             <View style={styles.colTopRow}>
               <Text style={styles.colHeader}>IN LOBBY</Text>
-              <View style={styles.countBadge}>
+              <View style={[styles.countBadge, { backgroundColor: modeColor }]}>
                 <Text style={styles.countBadgeText}>{attendees.length}</Text>
               </View>
               <View style={styles.livePill}>
@@ -601,7 +593,7 @@ export default function LobbyScreen({ navigation, route }) {
             ) : (
               attendees.slice(0, 8).map((a, i) => (
                 <View key={a.id || i} style={styles.attendeeRow}>
-                  <View style={styles.attendeeAvatar}>
+                  <View style={[styles.attendeeAvatar, { backgroundColor: modeColor }]}>
                     <Text style={styles.attendeeAvatarText}>
                       {getInitials(a.profiles?.full_name || a.guest_name)}
                     </Text>
@@ -620,7 +612,7 @@ export default function LobbyScreen({ navigation, route }) {
 
             {!isHost && (
               <TouchableOpacity
-                style={styles.submitBtn}
+                style={[styles.submitBtn, { backgroundColor: modeColor }]}
                 onPress={() => navigation.navigate('SubmitFile')}
                 activeOpacity={0.85}
               >
@@ -647,6 +639,7 @@ export default function LobbyScreen({ navigation, route }) {
                     style={[
                       styles.capacityFill,
                       {
+                        backgroundColor: modeColor,
                         width: `${Math.min(
                           100,
                           (attendees.length / (session?.max_attendees || 50)) * 100
@@ -662,7 +655,7 @@ export default function LobbyScreen({ navigation, route }) {
                 onPress={() => setShowMusicPanel(!showMusicPanel)}
                 activeOpacity={0.8}
               >
-                <Ionicons name={playingTrackId ? 'volume-high-outline' : 'musical-notes-outline'} size={16} color={palette.primary} />
+                <Ionicons name={playingTrackId ? 'volume-high-outline' : 'musical-notes-outline'} size={16} color={modeColor} />
                 <Text style={styles.musicLabel}>
                   {currentTrack ? currentTrack.name : 'Lobby Music'}
                 </Text>
@@ -676,23 +669,23 @@ export default function LobbyScreen({ navigation, route }) {
                       key={track.id}
                       style={[
                         styles.trackRow,
-                        playingTrackId === track.id && styles.trackRowActive,
+                        playingTrackId === track.id && [styles.trackRowActive, { backgroundColor: modeSoft, borderColor: modeColor }],
                       ]}
                       onPress={() =>
                         playingTrackId === track.id ? stopMusic() : playTrack(track)
                       }
                       activeOpacity={0.8}
                     >
-                      <TrackIcon track={track} size={16} color={playingTrackId === track.id ? palette.primary : palette.ink} />
+                      <TrackIcon track={track} size={16} color={playingTrackId === track.id ? modeColor : palette.ink} />
                       <Text
                         style={[
                           styles.trackName,
-                          playingTrackId === track.id && styles.trackNameActive,
+                          playingTrackId === track.id && { color: modeColor },
                         ]}
                       >
                         {track.name}
                       </Text>
-                      <Ionicons name={playingTrackId === track.id ? 'stop-circle-outline' : 'play-circle-outline'} size={18} color={playingTrackId === track.id ? palette.primary : palette.neutralText} />
+                      <Ionicons name={playingTrackId === track.id ? 'stop-circle-outline' : 'play-circle-outline'} size={18} color={playingTrackId === track.id ? modeColor : palette.neutralText} />
                     </TouchableOpacity>
                   ))}
                   {playingTrackId && (
@@ -726,7 +719,7 @@ export default function LobbyScreen({ navigation, route }) {
         {/* Start button */}
         {isHost && (
           <TouchableOpacity
-            style={[styles.startBtn, starting && styles.startBtnDisabled]}
+            style={[styles.startBtn, { backgroundColor: modeColor }, starting && styles.startBtnDisabled]}
             onPress={startSession}
             disabled={starting}
             activeOpacity={0.85}
