@@ -7,6 +7,7 @@ import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
+import { getPlan } from '../../lib/constants';
 
 // ─────────────────────────────────────────────────────────────────────
 // PALETTE — same tokens/mapping as the other production-pass screens
@@ -48,6 +49,19 @@ const MEMBER_SINCE_FORMAT = (iso) => {
     return null;
   }
 };
+
+// Shared by all three usage bars. `ratio` is remaining/total (0–1) — bars
+// fill to how much is LEFT, matching the "X left" text next to them, so a
+// nearly-empty bar reads the same way a nearly-empty fuel gauge does.
+// `healthyColor` lets each row keep its own accent (primary for hosting/
+// sessions, premium for recording) right up until it's actually running
+// low, at which point amber/danger take over regardless of row — the
+// warning colors are universal, the "everything's fine" colors aren't.
+function getUsageBarColor(ratio, healthyColor, palette) {
+  if (ratio <= 0.15) return palette.danger;
+  if (ratio <= 0.4) return palette.amber;
+  return healthyColor;
+}
 
 export default function Profile({ navigation }) {
   const [notifications, setNotifications] = useState(true);
@@ -280,11 +294,26 @@ export default function Profile({ navigation }) {
     { icon: 'notifications-outline', label: 'Notifications', toggle: true, value: notifications, onChange: setNotifications },
     { icon: 'videocam-outline', label: 'Audio & Video Defaults', arrow: true },
     { icon: 'lock-closed-outline', label: 'Privacy & Security', arrow: true },
-    { icon: 'card-outline', label: 'Subscription & Billing', arrow: true, onPress: () => navigation.navigate('Upgrade') },
-    { icon: 'shield-checkmark-outline', label: 'Ban Management', arrow: true, onPress: () => navigation.navigate('BanManagement') },
+    { icon: 'card-outline', label: 'Subscription & Billing', arrow: true, onPress: () => navigation.navigate('Upgrade'), tint: themePalette.premium, tintSoft: themePalette.premiumSoft },
+    { icon: 'shield-checkmark-outline', label: 'Ban Management', arrow: true, onPress: () => navigation.navigate('BanManagement'), tint: themePalette.danger, tintSoft: themePalette.dangerSoft },
     { icon: 'help-circle-outline', label: 'Help & Support', arrow: true },
     { icon: 'document-text-outline', label: 'Terms & Privacy Policy', arrow: true, onPress: () => navigation.navigate('TermsAndPrivacy') },
   ];
+
+  // Plan totals for the bars below — same PLANS table CreateSession and
+  // UpgradeScreen already use, so these can't quietly drift from what the
+  // account was actually sold. Bars fill to remaining/total, clamped to
+  // 100% — a rollover month can leave someone with MORE than a fresh
+  // month's allowance, which should read as "comfortably full," not
+  // overflow the bar.
+  const planTotals = getPlan(profile?.plan);
+  const sessionsCap = ATTEND_CAPS[profile?.plan] ?? ATTEND_CAPS.free;
+
+  const UsageBar = ({ ratio, color }) => (
+    <View style={styles.usageBarTrack}>
+      <View style={[styles.usageBarFill, { width: `${Math.max(0, Math.min(1, ratio)) * 100}%`, backgroundColor: color }]} />
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -417,29 +446,58 @@ export default function Profile({ navigation }) {
         {/* Minutes left this month */}
         {usage && (
           <View style={styles.usageCard}>
-            <View style={styles.usageRow}>
-              <Ionicons name="videocam-outline" size={16} color={themePalette.primary} />
-              <Text style={styles.usageLabel}>Hosting minutes left</Text>
-              <Text style={styles.usageValue}>{usage.host_minutes_balance}</Text>
+            <View style={styles.usageRowGroup}>
+              <View style={styles.usageRow}>
+                <Ionicons name="videocam-outline" size={16} color={themePalette.primary} />
+                <Text style={styles.usageLabel}>Hosting minutes left</Text>
+                <Text style={styles.usageValue}>{usage.host_minutes_balance}</Text>
+              </View>
+              <UsageBar
+                ratio={planTotals.hostMinutes > 0 ? usage.host_minutes_balance / planTotals.hostMinutes : 0}
+                color={getUsageBarColor(
+                  planTotals.hostMinutes > 0 ? usage.host_minutes_balance / planTotals.hostMinutes : 0,
+                  themePalette.primary,
+                  themePalette
+                )}
+              />
             </View>
             {profile?.plan && profile.plan !== 'free' && (
-              <View style={styles.usageRow}>
-                <Ionicons name="radio-button-on" size={14} color={themePalette.premium} />
-                <Text style={styles.usageLabel}>Recording minutes left</Text>
-                <Text style={styles.usageValue}>{usage.recording_minutes_balance}</Text>
+              <View style={styles.usageRowGroup}>
+                <View style={styles.usageRow}>
+                  <Ionicons name="radio-button-on" size={14} color={themePalette.premium} />
+                  <Text style={styles.usageLabel}>Recording minutes left</Text>
+                  <Text style={styles.usageValue}>{usage.recording_minutes_balance}</Text>
+                </View>
+                <UsageBar
+                  ratio={planTotals.recordingMinutes > 0 ? usage.recording_minutes_balance / planTotals.recordingMinutes : 0}
+                  color={getUsageBarColor(
+                    planTotals.recordingMinutes > 0 ? usage.recording_minutes_balance / planTotals.recordingMinutes : 0,
+                    themePalette.premium,
+                    themePalette
+                  )}
+                />
               </View>
             )}
-            <View style={styles.usageRow}>
-              <Ionicons name="people-outline" size={16} color={themePalette.primary} />
-              <Text style={styles.usageLabel}>Sessions you can attend</Text>
-              <Text style={styles.usageValue}>
-                {(() => {
-                  const cap = ATTEND_CAPS[profile?.plan] ?? ATTEND_CAPS.free;
-                  if (cap === null) return 'Unlimited';
-                  const used = usage.attended_sessions || 0;
-                  return `${Math.max(0, cap - used)} of ${cap} left`;
-                })()}
-              </Text>
+            <View style={styles.usageRowGroup}>
+              <View style={styles.usageRow}>
+                <Ionicons name="people-outline" size={16} color={themePalette.primary} />
+                <Text style={styles.usageLabel}>Sessions you can attend</Text>
+                <Text style={styles.usageValue}>
+                  {sessionsCap === null
+                    ? 'Unlimited'
+                    : `${Math.max(0, sessionsCap - (usage.attended_sessions || 0))} of ${sessionsCap} left`}
+                </Text>
+              </View>
+              {sessionsCap !== null && (
+                <UsageBar
+                  ratio={Math.max(0, sessionsCap - (usage.attended_sessions || 0)) / sessionsCap}
+                  color={getUsageBarColor(
+                    Math.max(0, sessionsCap - (usage.attended_sessions || 0)) / sessionsCap,
+                    themePalette.primary,
+                    themePalette
+                  )}
+                />
+              )}
             </View>
             <Text style={styles.usageNote}>
               {profile?.plan && profile.plan !== 'free'
@@ -458,8 +516,8 @@ export default function Profile({ navigation }) {
               onPress={row.onPress}
               activeOpacity={row.onPress ? 0.7 : 1}
             >
-              <View style={styles.settingIconWrap}>
-                <Ionicons name={row.icon} size={17} color={themePalette.primary} />
+              <View style={[styles.settingIconWrap, row.tintSoft && { backgroundColor: row.tintSoft }]}>
+                <Ionicons name={row.icon} size={17} color={row.tint || themePalette.primary} />
               </View>
               <Text style={styles.settingLabel}>{row.label}</Text>
 
@@ -609,6 +667,9 @@ const getStyles = (themePal, cardShadow) => StyleSheet.create({
     borderRadius: 17, padding: 16, gap: 10, ...cardShadow,
   },
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  usageRowGroup: { gap: 5 },
+  usageBarTrack: { height: 4, borderRadius: 2, backgroundColor: themePal.neutralSoft, overflow: 'hidden' },
+  usageBarFill: { height: '100%', borderRadius: 2 },
   usageLabel: { flex: 1, fontSize: 12.5, color: themePal.inkMuted, fontWeight: '600' },
   usageValue: { fontSize: 14, color: themePal.ink, fontWeight: '800' },
   usageNote: { fontSize: 11, color: themePal.neutralText, fontWeight: '500', marginTop: 2 },
