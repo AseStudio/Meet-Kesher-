@@ -1467,7 +1467,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   label={hostUser?.name ? hostUser.name : "You"}
                   style={{ flex: 1 }}
                   initialsSize={13}
-                  mirror={true}
+                  mirror={!screenSharing}
                 />
               </View>
             </View>
@@ -1522,7 +1522,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                     label="You (Host)"
                     style={{ flex: 1 }}
                     initialsSize={22}
-                    mirror={true}
+                    mirror={!screenSharing}
                   />
                   {iAmSpeaking && <View style={[styles.galleryCellActive, { pointerEvents: 'none' }]} />}
                 </View>
@@ -1572,7 +1572,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                       label={hostUser?.name ? `${hostUser.name} (Host)` : "You (Host)"}
                       style={{ flex: 1 }}
                       initialsSize={40}
-                      mirror={true}
+                      mirror={!screenSharing}
                     />
                   ) : (
                     <View style={styles.noVideoPlaceholder}>
@@ -1606,7 +1606,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
                       label={hostUser?.name ? hostUser.name : "You"}
                       style={{ flex: 1 }}
                       initialsSize={14}
-                      mirror={true}
+                      mirror={!screenSharing}
                     />
                   </View>
                 )}
