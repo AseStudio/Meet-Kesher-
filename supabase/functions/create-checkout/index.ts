@@ -8,9 +8,9 @@ const APP_URL = Deno.env.get('APP_URL') || 'https://meet-kesher.vercel.app';
 // business activation completes — same three tiers, this is the only
 // place that needs to change, no other code touches these directly.
 const PAYSTACK_PLANS: Record<string, string> = {
-  pro: 'PLN_ajw7f04djybtyod',
-  max: 'PLN_9aa748hvw8f5y2s',
-  premium: 'PLN_hrbk2uosxz0c2x6',
+  pro: 'PLN_vcafsqh1p1t77i4',
+  max: 'PLN_7zo8bre6jl700fn',
+  premium: 'PLN_5fh9ewkolpx6pmz',
 };
 
 // Filled in once Stripe Price IDs exist. Until then the Stripe branch
