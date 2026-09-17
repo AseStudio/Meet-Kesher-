@@ -4,9 +4,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_SECRET_KEY')!;
 const APP_URL = Deno.env.get('APP_URL') || 'https://meet-kesher.vercel.app';
 
-// Paystack test-mode plan codes. Swap for the live-mode codes once
-// business activation completes — same three tiers, this is the only
-// place that needs to change, no other code touches these directly.
+// Live-mode Paystack plan codes. These are also used for the "pay once"
+// flow below (see fetchPlanAmount) purely to look up the amount/currency,
+// not to attach a recurring plan to the charge.
 const PAYSTACK_PLANS: Record<string, string> = {
   pro: 'PLN_vcafsqh1p1t77i4',
   max: 'PLN_7zo8bre6jl700fn',
@@ -37,6 +37,20 @@ const corsHeaders = {
 // which is exactly what was sending hosts to /undefined on checkout).
 const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
 
+// "Pay once" reuses whatever amount/currency the plan is actually priced
+// at on Paystack, instead of a second hardcoded price that could quietly
+// drift out of sync with the recurring price. One extra API call, but it
+// means the one-time charge is *always* exactly one month of the current
+// plan price, in whatever currency the integration is set up for.
+async function fetchPlanAmount(planCode: string): Promise<{ amount: number; currency: string }> {
+  const res = await fetch(`https://api.paystack.co/plan/${planCode}`, {
+    headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+  });
+  const data = await res.json();
+  if (!data.status) throw new Error(data.message || 'Could not look up plan price');
+  return { amount: data.data.amount, currency: data.data.currency };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -57,37 +71,62 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401, headers: jsonHeaders });
     }
 
-    const { processor, plan } = await req.json();
+    const { processor, plan, billing } = await req.json();
     if (!['pro', 'max', 'premium'].includes(plan)) {
       return new Response(JSON.stringify({ error: 'Invalid plan' }), { status: 400, headers: jsonHeaders });
     }
+    // 'recurring' (default) auto-renews via a Paystack subscription plan.
+    // 'once' is a single charge for one billing period, no auto-renewal.
+    const billingType = billing === 'once' ? 'once' : 'recurring';
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     if (processor === 'paystack') {
       const planCode = PAYSTACK_PLANS[plan];
+
+      const initPayload: Record<string, unknown> = {
+        email: user.email,
+        callback_url: `${APP_URL}/app?upgrade=paystack&plan=${plan}`,
+        metadata: { user_id: user.id, plan, billing: billingType },
+      };
+
+      if (billingType === 'recurring') {
+        initPayload.plan = planCode;
+        // Required by Paystack's API even when a plan is attached — and
+        // per their own docs, "the amount used to create the plan takes
+        // precedence when subscribing to a plan," so this value is never
+        // what actually gets charged. It just has to clear their minimum.
+        // That minimum is NGN 100, and amounts are in kobo (1 Naira = 100
+        // kobo) — so the real floor is 10,000, not 100. Sending 100 (= ₦1)
+        // was the actual bug behind "Invalid Amount Sent": it satisfied
+        // "amount is present" but not "amount clears the minimum."
+        initPayload.amount = 10000;
+        // Auto-renewal only works off a reusable card authorization (or
+        // direct debit, Nigeria-only) — Paystack has no way to re-charge
+        // a Mobile Money payment later. Restricting to card here avoids
+        // a customer paying the first month via MoMo and then silently
+        // failing every renewal after that.
+        initPayload.channels = ['card'];
+      } else {
+        // No `plan` field here — attaching one turns this into a
+        // subscription on Paystack's side regardless of intent. Pulling
+        // the real amount/currency off the plan object keeps this in
+        // sync with whatever the plan is actually priced at.
+        const { amount, currency } = await fetchPlanAmount(planCode);
+        initPayload.amount = amount;
+        initPayload.currency = currency;
+        // One-time charges never need to renew, so Mobile Money is fine
+        // here — this is the channel actually being added.
+        initPayload.channels = ['card', 'mobile_money'];
+      }
+
       const res = await fetch('https://api.paystack.co/transaction/initialize', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          email: user.email,
-          // Required by Paystack's API even when a plan is attached —
-          // and per their own docs, "the amount used to create the plan
-          // takes precedence when subscribing to a plan," so this value
-          // is never what actually gets charged. It just has to clear
-          // their minimum. That minimum is NGN 100, and amounts are in
-          // kobo (1 Naira = 100 kobo) — so the real floor is 10,000, not
-          // 100. Sending 100 (= ₦1) was the actual bug behind "Invalid
-          // Amount Sent": it satisfied "amount is present" but not
-          // "amount clears the minimum."
-          amount: 10000,
-          plan: planCode,
-          callback_url: `${APP_URL}/app?upgrade=paystack&plan=${plan}`,
-          metadata: { user_id: user.id, plan },
-        }),
+        body: JSON.stringify(initPayload),
       });
       const data = await res.json();
 
@@ -100,10 +139,19 @@ serve(async (req) => {
       // row exist right away is what lets a "confirming your
       // payment..." screen have something concrete to poll against
       // the moment the user is redirected back.
+      //
+      // NOTE: this insert assumes a `billing` column (and, for the
+      // 'once' case, something like an `expires_at` timestamp) exists
+      // on `subscriptions`. Whatever confirms payment on the webhook
+      // side also needs updating: a 'once' subscription should be
+      // stamped with an expiry ~30 days out and never expect a renewal
+      // charge, otherwise it behaves exactly like a recurring one and
+      // "no commitment" doesn't actually mean anything downstream.
       await admin.from('subscriptions').insert({
         user_id: user.id,
         processor: 'paystack',
         plan,
+        billing: billingType,
         status: 'pending',
         processor_subscription_id: data.data.reference,
       });

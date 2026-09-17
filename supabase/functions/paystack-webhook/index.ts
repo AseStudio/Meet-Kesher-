@@ -3,6 +3,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_SECRET_KEY')!;
 
+// One-time "pay once" purchases don't get a next_payment_date from
+// Paystack (there's no next payment) — access is just "now + 30 days".
+// This is the entire enforcement of "no commitment": nothing else
+// distinguishes a 'once' row from a 'recurring' one once it's active,
+// so getting this date right is what actually makes it expire.
+const ONCE_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
 // Paystack signs webhooks with the SAME secret key used for API calls
 // (no separate webhook-signing secret the way Stripe has one) — HMAC
 // SHA-512 over the raw request body, hex-encoded, sent as
@@ -43,12 +50,23 @@ serve(async (req) => {
   // subscription and Paystack's own subscription.create event overlaps
   // with it in practice — handling both keeps this idempotent rather
   // than depending on exactly one event type always firing first.
+  // subscription.create only ever fires for a plan-attached (recurring)
+  // charge, so it's a no-op for 'once' purchases — those only ever
+  // raise charge.success, which is handled the same way either way.
   if (event.event === 'charge.success' || event.event === 'subscription.create') {
     const userId = event.data.metadata?.user_id;
     const plan = event.data.metadata?.plan;
+    // create-checkout stamps this on the transaction it initializes;
+    // default to 'recurring' so older transactions without it (created
+    // before this field existed) keep behaving exactly as they did.
+    const billing = event.data.metadata?.billing === 'once' ? 'once' : 'recurring';
     const subscriptionCode = event.data.subscription_code || event.data.reference;
 
     if (userId && plan) {
+      const currentPeriodEnd = billing === 'once'
+        ? new Date(Date.now() + ONCE_PERIOD_MS).toISOString()
+        : (event.data.next_payment_date || null);
+
       await admin.from('subscriptions').upsert(
         {
           user_id: userId,
@@ -56,8 +74,9 @@ serve(async (req) => {
           processor_subscription_id: subscriptionCode,
           processor_customer_id: event.data.customer?.customer_code || null,
           plan,
+          billing,
           status: 'active',
-          current_period_end: event.data.next_payment_date || null,
+          current_period_end: currentPeriodEnd,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'processor_subscription_id' }

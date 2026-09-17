@@ -43,6 +43,11 @@ export default function UpgradeScreen({ navigation }) {
   const [currentPlan, setCurrentPlan] = useState('free');
   const [loading, setLoading] = useState(true);
   const [checkingOutPlan, setCheckingOutPlan] = useState(null);
+  // 'recurring' auto-renews monthly via a Paystack subscription plan.
+  // 'once' is a single charge for 30 days of access with no auto-renewal —
+  // same price, just no ongoing commitment. Applies to whichever plan the
+  // user taps, same as the monthly/annual toggle on most pricing pages.
+  const [billing, setBilling] = useState('recurring');
 
   useEffect(() => {
     (async () => {
@@ -68,7 +73,7 @@ export default function UpgradeScreen({ navigation }) {
 
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout', {
-        body: { processor: 'paystack', plan },
+        body: { processor: 'paystack', plan, billing },
       });
 
       if (error) {
@@ -125,6 +130,28 @@ export default function UpgradeScreen({ navigation }) {
         <Text style={styles.heroTitle}>Choose your plan</Text>
         <Text style={styles.heroSubtitle}>More minutes, more room, no ads — upgrade any time.</Text>
 
+        <View style={styles.billingToggle}>
+          <TouchableOpacity
+            style={[styles.billingOption, billing === 'recurring' && styles.billingOptionActive]}
+            onPress={() => setBilling('recurring')}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.billingOptionText, billing === 'recurring' && styles.billingOptionTextActive]}>Billed monthly</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.billingOption, billing === 'once' && styles.billingOptionActive]}
+            onPress={() => setBilling('once')}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.billingOptionText, billing === 'once' && styles.billingOptionTextActive]}>Pay once</Text>
+          </TouchableOpacity>
+        </View>
+        {billing === 'once' ? (
+          <Text style={styles.billingHint}>One charge, 30 days of access, no auto-renewal. Card or Mobile Money.</Text>
+        ) : (
+          <Text style={styles.billingHint}>Auto-renews monthly by card. Mobile Money can't auto-renew, so it's card-only here.</Text>
+        )}
+
         {PLANS.map((p) => {
           const isCurrent = currentPlan === p.key;
           const isFree = p.key === 'free';
@@ -172,7 +199,7 @@ export default function UpgradeScreen({ navigation }) {
                   <Text style={styles.premiumName}>{p.name}</Text>
                   <View style={styles.priceRow}>
                     <Text style={styles.premiumPrice}>{p.price}</Text>
-                    <Text style={styles.premiumPriceSuffix}>/mo</Text>
+                    <Text style={styles.premiumPriceSuffix}>{billing === 'recurring' ? '/mo' : ' one-time'}</Text>
                   </View>
 
                   <View style={styles.featureList}>{featureRows}</View>
@@ -213,7 +240,7 @@ export default function UpgradeScreen({ navigation }) {
                   <Text style={styles.planName}>{p.name}</Text>
                   <View style={styles.priceRow}>
                     <Text style={styles.planPrice}>{p.price}</Text>
-                    {!isFree && <Text style={styles.planPriceSuffix}>/mo</Text>}
+                    {!isFree && <Text style={styles.planPriceSuffix}>{billing === 'recurring' ? '/mo' : ' one-time'}</Text>}
                   </View>
                 </View>
                 {isCurrent && (
@@ -249,7 +276,11 @@ export default function UpgradeScreen({ navigation }) {
 
         <View style={styles.footNoteRow}>
           <Ionicons name="shield-checkmark-outline" size={13} color={palette.neutralText} />
-          <Text style={styles.footNote}>Payments processed by Paystack. Plans renew monthly and can be changed any time.</Text>
+          <Text style={styles.footNote}>
+            {billing === 'recurring'
+              ? 'Payments processed by Paystack. Plans renew monthly and can be changed any time.'
+              : 'Payments processed by Paystack. One-time charges do not auto-renew — upgrade again whenever you like.'}
+          </Text>
         </View>
       </ScrollView>
     </View>
@@ -289,6 +320,15 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 18, paddingBottom: 36 },
   heroTitle: { fontSize: 26, fontWeight: '800', color: palette.ink, letterSpacing: -0.5, marginTop: 6 },
   heroSubtitle: { fontSize: 13.5, color: palette.inkMuted, fontWeight: '500', marginTop: 6, marginBottom: 22, lineHeight: 19 },
+
+  billingToggle: {
+    flexDirection: 'row', backgroundColor: palette.primarySoft, borderRadius: 12, padding: 3, marginBottom: 8,
+  },
+  billingOption: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
+  billingOptionActive: { backgroundColor: palette.surface, ...cardShadow },
+  billingOptionText: { fontSize: 13, fontWeight: '700', color: palette.neutralText },
+  billingOptionTextActive: { color: palette.primary },
+  billingHint: { fontSize: 12, color: palette.inkMuted, fontWeight: '500', marginBottom: 18, marginTop: -2 },
 
   card: { backgroundColor: palette.surface, borderRadius: 20, padding: 20, borderWidth: 1.5, borderColor: palette.line, marginBottom: 14 },
   cardCurrent: { borderColor: palette.primary },
