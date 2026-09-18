@@ -557,7 +557,11 @@ export default function AttendeeSession({ navigation, route }) {
       setJoined(true);
     } catch (err) {
       console.error('Agora error:', err.message);
-      Alert.alert('Connection Error', 'Could not join the session.');
+      if (err.message?.includes('permissions are required')) {
+        Alert.alert('Camera & Microphone Needed', 'Please allow camera and microphone access in your device settings to join the session.');
+      } else {
+        Alert.alert('Connection Error', 'Could not join the session.');
+      }
     }
 
     // Broadcast identity so host can map our Agora UID to our profile

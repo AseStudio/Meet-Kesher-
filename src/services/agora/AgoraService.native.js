@@ -11,6 +11,25 @@ import {
   ChannelProfileType,
   ClientRoleType,
 } from 'react-native-agora';
+import { PermissionsAndroid, Platform } from 'react-native';
+
+// CAMERA/RECORD_AUDIO are "dangerous" permissions on Android — declaring
+// them in app.json's android.permissions gets them into the manifest,
+// but the OS still won't grant them until the app asks at runtime.
+// Agora's engine doesn't do this itself; joining without it means the
+// engine initializes "successfully" but captures silence/black frames,
+// which is a much more confusing failure than a clear permission denial.
+async function ensureMediaPermissions() {
+  if (Platform.OS !== 'android') return true;
+  const granted = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.CAMERA,
+    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+  ]);
+  return (
+    granted[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED &&
+    granted[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED
+  );
+}
 
 export const VIDEO_PROFILES = {
   ultra:  { width: 1920, height: 1080, frameRate: 30, bitrate: 3000 },
@@ -28,6 +47,11 @@ export function createAgoraSession(handlers = {}) {
 
   return {
     async join(appId, channel, token, uid) {
+      const hasPermissions = await ensureMediaPermissions();
+      if (!hasPermissions) {
+        throw new Error('Camera and microphone permissions are required to join a session.');
+      }
+
       engine = createAgoraRtcEngine();
       engine.initialize({
         appId,

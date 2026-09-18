@@ -729,7 +729,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
     setJoined(true);
   } catch (err) {
     console.error('Agora init error:', err.message);
-    Alert.alert('Connection Failed', 'Could not start the session. Check your internet.');
+    if (err.message?.includes('permissions are required')) {
+      Alert.alert('Camera & Microphone Needed', 'Please allow camera and microphone access in your device settings to join the session.');
+    } else {
+      Alert.alert('Connection Failed', 'Could not start the session. Check your internet.');
+    }
   }
 };
 
