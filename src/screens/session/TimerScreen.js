@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getPlan } from '../../lib/constants';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 
@@ -8,6 +9,7 @@ export default function TimerScreen({ navigation, route }) {
   const session = route.params?.session;
   const [hostMinutes, setHostMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
+  const [plan, setPlan] = useState('free');
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [notificationShown, setNotificationShown] = useState({ five: false, zero: false });
@@ -22,13 +24,17 @@ export default function TimerScreen({ navigation, route }) {
           return;
         }
 
-        // Fetch premium status
+        // Fetch plan (is_premium is a DB column nothing ever writes
+        // after checkout — the webhook only updates profiles.plan — so
+        // it's always false/null; derive "premium" from plan instead,
+        // same as CommunityScreen/CreateSession).
         const { data: profile } = await supabase
           .from('profiles')
-          .select('is_premium')
+          .select('plan')
           .eq('id', user.id)
           .maybeSingle();
-        setIsPremium(!!profile?.is_premium);
+        setIsPremium(!!profile?.plan && profile.plan !== 'free');
+        setPlan(profile?.plan || 'free');
 
         // Fetch hosting minutes balance
         const { data: usageRow } = await supabase.rpc('get_my_usage');
@@ -186,8 +192,8 @@ export default function TimerScreen({ navigation, route }) {
           <Ionicons name="information-circle-outline" size={17} color="rgba(255,255,255,0.6)" />
           <Text style={styles.infoText}>
             {isPremium 
-              ? 'You have unlimited session minutes as a Premium user.'
-              : 'Free users get 30 minutes per month. Upgrade to Premium for unlimited sessions.'
+              ? `You're on the ${getPlan(plan).name} plan — ${getPlan(plan).hostMinutes} hosting minutes per session.`
+              : 'Free hosts get 30 minutes per session. Upgrade for more hosting time.'
             }
           </Text>
         </View>

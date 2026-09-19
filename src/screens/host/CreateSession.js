@@ -86,10 +86,15 @@ export default function CreateSession({ navigation }) {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: profile } = await supabase.from('profiles').select('plan, is_premium').eq('id', user.id).maybeSingle();
+      const { data: profile } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
       const nextPlan = profile?.plan || 'free';
       setPlan(nextPlan);
-      setIsPremium(!!profile?.is_premium);
+      // is_premium is a DB column nothing ever writes after checkout —
+      // the Paystack webhook only updates profiles.plan — so it's always
+      // false/null. Deriving "premium" from plan itself, the same way
+      // CommunityScreen already does, is what actually reflects a real
+      // upgrade.
+      setIsPremium(nextPlan !== 'free');
 
       // Default the counter to this plan's cap so hosts see the most
       // attendees they can have by default; if they'd already nudged the

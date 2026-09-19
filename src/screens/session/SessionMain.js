@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { createAgoraSession } from '../../services/agora/AgoraService';
-import { AGORA_APP_ID } from '../../lib/constants';
+import { AGORA_APP_ID, getPlan } from '../../lib/constants';
 import VideoTile from '../../components/VideoTile';
 import WhiteboardCanvas from '../../components/WhiteboardCanvas'; // adjust path if these live elsewhere
 import GraphBoardCanvas from '../../components/GraphboardCanvas';
@@ -53,7 +53,8 @@ export default function SessionMain({ navigation, route }) {
   // no equivalent in React Native's native runtime at all, and spotty
   // support even in mobile browsers. Neither of these is knowable until
   // runtime, so both start false/unknown and get set properly on mount.
-  const [isPremium, setIsPremium] = useState(false);
+  const [plan, setPlan] = useState('free');
+  const canRecord = getPlan(plan).recordingMinutes > 0;
   const recordingSupported = Platform.OS === 'web'
     && typeof navigator !== 'undefined'
     && !!navigator.mediaDevices?.getDisplayMedia;
@@ -64,6 +65,9 @@ export default function SessionMain({ navigation, route }) {
   // read by endSession() below, which needs to wait for that Blob to
   // actually exist before it can upload anything.
   const recordingStopResolverRef = useRef(null);
+  // When the current recording started — used at upload time to work out
+  // how many whole minutes to deduct from the host's recording balance.
+  const recordingStartedAtRef = useRef(null);
   const [view, setView] = useState('speaker');
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [activeSpeakerUid, setActiveSpeakerUid] = useState(null); // null = default (show host)
@@ -93,18 +97,21 @@ export default function SessionMain({ navigation, route }) {
     };
   }, []);
 
-  // Recording is gated on Premium — same is_premium flag the feed
-  // already uses to decide who sees ads. No real payment collection
-  // exists behind it yet (that's still "payments later"), so this
-  // doesn't offset any cost — but recording here is free client-side
-  // capture, not the paid Agora Cloud Recording path, so there's no
-  // cost to offset in the first place.
+  // Recording eligibility is driven by the host's actual plan
+  // (constants.js PLANS[].recordingMinutes > 0 — currently Pro, Max and
+  // Premium), not a separate "is_premium" flag. That flag exists as a DB
+  // column but nothing in this codebase ever writes it after checkout —
+  // the Paystack webhook only updates profiles.plan — so it stays
+  // false/null forever and silently hid the Record button from every
+  // paying host regardless of tier. Reading plan directly, the same way
+  // CommunityScreen/CreateSession/UpgradeScreen already do, is what
+  // actually reflects a real upgrade.
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('profiles').select('is_premium').eq('id', user.id).maybeSingle();
-      setIsPremium(!!data?.is_premium);
+      const { data } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
+      setPlan(data?.plan || 'free');
     })();
   }, []);
 
@@ -1070,10 +1077,10 @@ function getProfileKey(uplink = 0, downlink = 0) {
   };
 
   const toggleRecording = async () => {
-    if (!isPremium) {
+    if (!canRecord) {
       showAlert(
-        'Kesher Premium',
-        'Recording sessions is a Premium feature — upgrade to record and download your sessions.',
+        'Recording not on your plan',
+        'Recording sessions is available on Pro, Max and Premium — upgrade to record and download your sessions.',
         [
           { text: 'Not now', style: 'cancel' },
           { text: 'See Plans', onPress: () => navigation.navigate('Upgrade') },
@@ -1117,6 +1124,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
 
       recorder.start();
       mediaRecorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
       setRecording(true);
     } catch (e) {
       // The host cancelling the share picker throws NotAllowedError —
@@ -1165,6 +1173,19 @@ function getProfileKey(uplink = 0, downlink = 0) {
             if (!uploadError) {
               recordingPath = path;
               await supabase.from('sessions').update({ recording_path: path }).eq('id', session.id);
+
+              // Deduct recording minutes now, at upload time — not when
+              // the host later downloads or dismisses it on the summary
+              // screen. The recording was made either way, so the cost
+              // is incurred either way; same reasoning as consume_host_minutes
+              // below being billed off actual elapsed time, not off some
+              // later, unrelated user action.
+              if (recordingStartedAtRef.current) {
+                const recordedMinutes = Math.max(1, Math.ceil((Date.now() - recordingStartedAtRef.current) / 60000));
+                try {
+                  await supabase.rpc('consume_recording_minutes', { p_minutes: recordedMinutes });
+                } catch (e) {}
+              }
             }
           }
         } catch (e) {
@@ -1307,12 +1328,12 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
     // Free hosts never see this at all — not shown-then-blocked, just
-    // absent. isPremium starts false until the profile fetch resolves,
-    // so this also means the button briefly doesn't exist for a Premium
+    // absent. canRecord starts false until the plan fetch resolves, so
+    // this also means the button briefly doesn't exist for an eligible
     // host in the first instant after mount; that's an acceptable
     // trade-off for "free users never even see it" over a flash of an
     // enabled-then-disabled button while the check is in flight.
-    ...(isPremium ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
+    ...(canRecord ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
     { icon: 'power-outline', label: 'End', action: endSession, end: true },
   ];
 
