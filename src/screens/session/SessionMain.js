@@ -1186,11 +1186,25 @@ function getProfileKey(uplink = 0, downlink = 0) {
                   await supabase.rpc('consume_recording_minutes', { p_minutes: recordedMinutes });
                 } catch (e) {}
               }
+            } else {
+              // Logged, not surfaced to the host — see comment above on
+              // why this stays best-effort. But silent-and-invisible is
+              // exactly why "the card isn't showing up" was undebuggable
+              // before this: check the browser console next time it
+              // happens, this is the line that will explain it (RLS
+              // policy on the bucket, bucket doesn't exist, size limit,
+              // network drop mid-upload, etc).
+              console.error('Recording upload failed:', uploadError.message, uploadError);
             }
+          } else if (!user) {
+            console.error('Recording upload skipped: no authenticated user at end-of-session.');
+          } else if (blob.size === 0) {
+            console.error('Recording upload skipped: recorded blob was empty (0 bytes).');
           }
         } catch (e) {
           // Best-effort — see comment above. The host still gets their
           // summary screen even if the recording upload failed.
+          console.error('Recording capture/upload threw:', e.message, e);
         }
       }
 
