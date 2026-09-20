@@ -46,6 +46,31 @@ serve(async (req) => {
   const event = JSON.parse(rawBody);
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+  // Participant-minute purchases are a completely separate product from
+  // plan subscriptions — different table, never touches profiles.plan,
+  // no expiry, no renewal. Handled and returned early here so nothing
+  // below (which is all subscription/plan logic) runs against it.
+  if (event.event === 'charge.success' && event.data.metadata?.kind === 'participant_minutes') {
+    const userId = event.data.metadata?.user_id;
+    const minutes = event.data.metadata?.minutes;
+    const reference = event.data.reference;
+
+    if (userId && minutes) {
+      // increment_participant_minutes is SECURITY DEFINER and locked
+      // down to the service role (see the migration) specifically so
+      // no authenticated user can call it directly and grant themselves
+      // free minutes — only this webhook, running as service role,
+      // can invoke it.
+      await admin.rpc('increment_participant_minutes', { p_user_id: userId, p_minutes: minutes });
+      await admin
+        .from('minute_purchases')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('processor_reference', reference);
+    }
+
+    return new Response('ok', { status: 200 });
+  }
+
   // charge.success covers both the very first payment on a new
   // subscription and Paystack's own subscription.create event overlaps
   // with it in practice — handling both keeps this idempotent rather

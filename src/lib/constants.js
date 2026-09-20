@@ -24,3 +24,29 @@ export function getPlan(planKey) {
 export function getPlanMaxAttendees(planKey) {
   return getPlan(planKey).maxAttendees;
 }
+
+// Participant minutes are sold separately from a host's plan minutes,
+// and never touch profiles.plan or the subscriptions table — see
+// StoreScreen for the user-facing explanation of the difference.
+// Rate is per-minute at the slider's flat rate; the fixed packs below
+// carry a modest bulk discount off this, which is why their per-minute
+// price doesn't scale perfectly linearly — that's intentional, not a
+// rounding bug.
+export const PARTICIPANT_MINUTE_RATE_CEDIS = 0.22;
+export const PARTICIPANT_MINUTE_SLIDER_MIN = 10;
+export const PARTICIPANT_MINUTE_SLIDER_MAX = 2000;
+export const PARTICIPANT_MINUTE_SLIDER_STEP = 10;
+
+// id must match MINUTE_PACKS in the buy-minutes edge function exactly —
+// the server looks the id up and prices from its own copy, it never
+// trusts a client-sent amount. The two lists have to be kept in sync by
+// hand since the Expo app and the Deno edge function can't share an
+// import across that boundary.
+export const MINUTE_PACKS = [
+  { id: 'pm_60', minutes: 60, priceCedis: 13 },
+  { id: 'pm_120', minutes: 120, priceCedis: 25 },
+  { id: 'pm_300', minutes: 300, priceCedis: 62 },
+  { id: 'pm_600', minutes: 600, priceCedis: 121 },
+  { id: 'pm_1200', minutes: 1200, priceCedis: 245 },
+  { id: 'pm_6000', minutes: 6000, priceCedis: 1230 },
+];

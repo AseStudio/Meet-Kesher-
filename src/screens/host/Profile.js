@@ -507,6 +507,28 @@ export default function Profile({ navigation }) {
           </View>
         )}
 
+        {/* Participant minutes — a separate, non-expiring balance, sold
+            on the Store screen. Kept visually distinct from the usage
+            card above since it's a genuinely different system, not
+            another row of the same plan allowance. */}
+        <TouchableOpacity
+          style={styles.storeCard}
+          onPress={() => navigation.navigate('Store')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.storeCardLeft}>
+            <Ionicons name="flash-outline" size={18} color={themePalette.primary} />
+            <View>
+              <Text style={styles.storeCardLabel}>Participant minutes</Text>
+              <Text style={styles.storeCardValue}>{profile?.participant_minutes_balance ?? 0} available</Text>
+            </View>
+          </View>
+          <View style={styles.storeCardBuyBtn}>
+            <Text style={styles.storeCardBuyBtnText}>Buy more</Text>
+            <Ionicons name="chevron-forward" size={14} color={themePalette.primary} />
+          </View>
+        </TouchableOpacity>
+
         {/* Settings */}
         <View style={styles.settingsCard}>
           {settingsRows.map((row, i) => (
@@ -675,6 +697,18 @@ const getStyles = (themePal, cardShadow) => StyleSheet.create({
   usageNote: { fontSize: 11, color: themePal.neutralText, fontWeight: '500', marginTop: 2 },
   upgradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: themePal.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
   upgradeBtnText: { color: themePal.surface, fontWeight: '700', fontSize: 12.5 },
+
+  // ── Store entry (participant minutes) ──
+  storeCard: {
+    backgroundColor: themePal.surface, marginHorizontal: 20, marginTop: 10,
+    borderRadius: 17, padding: 16, ...cardShadow,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  storeCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  storeCardLabel: { fontSize: 12.5, color: themePal.inkMuted, fontWeight: '600' },
+  storeCardValue: { fontSize: 14, color: themePal.ink, fontWeight: '800', marginTop: 1 },
+  storeCardBuyBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  storeCardBuyBtnText: { color: themePal.primary, fontWeight: '700', fontSize: 12.5 },
 
   // ── Settings ──
   settingsCard: {
