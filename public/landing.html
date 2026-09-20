@@ -154,6 +154,17 @@
   }
   .noscript-fallback p{font-size:17px;line-height:1.7;margin-bottom:22px;color:var(--text-primary);}
   .noscript-fallback a{color:var(--accent-bright);}
+
+  /* ── Footer site links — sits below the progress dots ── */
+  .site-links{
+    position:fixed;left:50%;bottom:8px;transform:translateX(-50%);
+    z-index:20;display:flex;gap:16px;
+  }
+  .site-links a{
+    font-size:10.5px;color:var(--text-muted);text-decoration:none;
+    letter-spacing:0.02em;
+  }
+  .site-links a:hover{color:var(--accent-deep);}
 </style>
 </head>
 <body>
@@ -193,7 +204,13 @@
   <section class="panel" data-index="3">
     <p> Connect with your friends in get-togethers. </p></section>
 
-  <section class="panel cta" data-index="4">
+  <section class="panel" data-index="4">
+    <p> Stay connected between sessions in community channels built right in. </p></section>
+
+  <section class="panel" data-index="5">
+    <p> Simple pricing, paid how you like — by card or Mobile Money. </p></section>
+
+  <section class="panel cta" data-index="6">
     <h2>See it for yourself.</h2>
     <a class="continue-btn" href="/app">
       Continue to Kesher
@@ -209,10 +226,17 @@
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
 </div>
 
+<nav class="site-links" aria-label="Site">
+  <a href="/how-it-works">How it works</a>
+  <a href="/faq">FAQ</a>
+  <a href="/privacy.html">Privacy</a>
+  <a href="/terms.html">Terms</a>
+</nav>
+
 <noscript>
   <style>.stage,.progress,.hint,.motif{display:none;}</style>
   <div class="noscript-fallback">
-    <p>Kesher is an online virtual collaboaration tool that connects millions. Connect with your teacher in classroom sessions. Connect with your boss or boss-to-be in meetings and interviews. Connect with your freinds in get-togethers. Join and channels with people that share your intrest in Community. Start using Kesher now to experience the joy of seamless virtual collaboration.</p>
+    <p>Kesher is an online virtual collaboration tool that connects millions of people across the globe. Connect with your teacher in classroom sessions. Connect with your boss or boss-to-be in meetings and interviews. Connect with your friends in get-togethers. Stay connected between sessions in community channels built right in. Simple pricing, paid how you like — by card or Mobile Money.</p>
     <p><a href="/app">Continue to Kesher</a></p>
   </div>
 </noscript>

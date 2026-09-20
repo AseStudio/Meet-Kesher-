@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Kesher Works — Kesher</title>
+<meta name="description" content="How Kesher works: create a session, share a link, meet live, and stay connected between sessions with community channels.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-deep:#ffffff;
+    --accent-bright:#C084FC;
+    --accent-mid:#A855F7;
+    --accent-deep:#7E22CE;
+    --text-primary:#120818;
+    --text-muted:rgba(0, 0, 0, 0.62);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    color:var(--text-primary);
+    background:var(--bg-deep);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.6;
+  }
+  header{
+    display:flex;align-items:center;justify-content:center;gap:13px;
+    padding:26px 26px 22px;
+  }
+  header img{width:30px;height:30px;border-radius:8px;}
+  header span{font-family:'Sora',sans-serif;font-weight:700;font-size:18px;}
+  main{max-width:680px;margin:0 auto;padding:20px 24px 100px;}
+  h1{font-family:'Sora',sans-serif;font-size:clamp(28px,5vw,40px);margin-bottom:14px;}
+  .lede{font-size:17px;color:var(--text-muted);margin-bottom:48px;}
+  .step{display:flex;gap:18px;margin-bottom:38px;}
+  .step-num{
+    flex-shrink:0;width:36px;height:36px;border-radius:50%;
+    background:linear-gradient(135deg,var(--accent-bright),var(--accent-deep));
+    color:#fff;display:flex;align-items:center;justify-content:center;
+    font-family:'Sora',sans-serif;font-weight:700;font-size:15px;
+  }
+  .step h2{font-family:'Sora',sans-serif;font-size:19px;margin-bottom:6px;}
+  .step p{color:var(--text-muted);font-size:15.5px;}
+  section.extra{margin-top:56px;padding-top:36px;border-top:1px solid rgba(0,0,0,0.08);}
+  section.extra h2{font-family:'Sora',sans-serif;font-size:22px;margin-bottom:10px;}
+  section.extra p{color:var(--text-muted);font-size:15.5px;margin-bottom:12px;}
+  .cta{
+    display:inline-flex;align-items:center;gap:8px;margin-top:40px;
+    background:linear-gradient(135deg,var(--accent-mid),var(--accent-deep));
+    color:#fff;text-decoration:none;font-weight:600;font-size:15px;
+    padding:13px 24px;border-radius:12px;
+  }
+  footer{
+    display:flex;justify-content:center;gap:20px;padding:30px 24px 40px;
+    font-size:12.5px;color:var(--text-muted);
+  }
+  footer a{color:inherit;text-decoration:none;}
+  footer a:hover{color:var(--accent-deep);}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="logo.png" alt="" onerror="this.style.display='none'">
+  <span>Kesher</span>
+</header>
+
+<main>
+  <h1>How Kesher works</h1>
+  <p class="lede">From setting up your first session to staying in touch between them — here's the whole flow.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div>
+      <h2>Create a session</h2>
+      <p>Set up a session as a host and get a shareable link. No complicated setup — you're ready to invite people in a couple of taps.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div>
+      <h2>Share the link</h2>
+      <p>Send it to whoever you're meeting with — a class, a job candidate, an interview, a get-together. They join with the link, no separate account wrangling required on their end.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div>
+      <h2>Meet live</h2>
+      <p>Real-time video and audio for everyone in the session, built to hold up on ordinary connections — quality adjusts automatically so the call keeps going even when bandwidth doesn't cooperate.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div>
+      <h2>Stay connected after</h2>
+      <p>Community channels keep the conversation going between sessions, so the relationship doesn't reset to zero every time the call ends.</p>
+    </div>
+  </div>
+
+  <section class="extra">
+    <h2>Recording sessions</h2>
+    <p>Hosts on a paid plan can record a session from a desktop browser. Once the session ends, the recording is ready to preview and download right from the summary screen.</p>
+  </section>
+
+  <section class="extra">
+    <h2>Plans and payment</h2>
+    <p>Kesher has a free tier plus paid Pro, Max, and Premium plans with more session time and features. When you upgrade, you can choose to be billed monthly or pay once for 30 days with no ongoing commitment — and pay by card or Mobile Money, whichever's easier.</p>
+  </section>
+
+  <a class="cta" href="/">
+    Get started
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+  </a>
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/faq">FAQ</a>
+  <a href="/privacy.html">Privacy</a>
+  <a href="/terms.html">Terms</a>
+</footer>
+
+</body>
+</html>

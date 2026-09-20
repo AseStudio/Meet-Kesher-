@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ — Kesher</title>
+<meta name="description" content="Frequently asked questions about Kesher — plans, payment, recording, privacy, and how sessions work.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-deep:#ffffff;
+    --accent-bright:#C084FC;
+    --accent-mid:#A855F7;
+    --accent-deep:#7E22CE;
+    --text-primary:#120818;
+    --text-muted:rgba(0, 0, 0, 0.62);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    color:var(--text-primary);
+    background:var(--bg-deep);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.6;
+  }
+  header{
+    display:flex;align-items:center;justify-content:center;gap:13px;
+    padding:26px 26px 22px;
+  }
+  header img{width:30px;height:30px;border-radius:8px;}
+  header span{font-family:'Sora',sans-serif;font-weight:700;font-size:18px;}
+  main{max-width:680px;margin:0 auto;padding:20px 24px 100px;}
+  h1{font-family:'Sora',sans-serif;font-size:clamp(28px,5vw,40px);margin-bottom:44px;}
+  details{
+    border-bottom:1px solid rgba(0,0,0,0.08);
+    padding:20px 0;
+  }
+  summary{
+    font-family:'Sora',sans-serif;font-weight:600;font-size:16.5px;
+    cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px;
+  }
+  summary::-webkit-details-marker{display:none;}
+  summary::after{
+    content:'+';font-size:22px;color:var(--accent-deep);flex-shrink:0;
+    transition:transform 0.2s ease;
+  }
+  details[open] summary::after{content:'−';}
+  details p{color:var(--text-muted);font-size:15px;margin-top:12px;}
+  footer{
+    display:flex;justify-content:center;gap:20px;padding:30px 24px 40px;
+    font-size:12.5px;color:var(--text-muted);
+  }
+  footer a{color:inherit;text-decoration:none;}
+  footer a:hover{color:var(--accent-deep);}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="logo.png" alt="" onerror="this.style.display='none'">
+  <span>Kesher</span>
+</header>
+
+<main>
+  <h1>Frequently asked questions</h1>
+
+  <details open>
+    <summary>What is Kesher?</summary>
+    <p>Kesher is a live video platform for hosting sessions — classes, meetings, interviews, or casual get-togethers — with community channels built in to keep the conversation going between sessions.</p>
+  </details>
+
+  <details>
+    <summary>Do I need to create an account?</summary>
+    <p>Hosting a session requires an account. Joining one someone shared with you is designed to be as low-friction as possible.</p>
+  </details>
+
+  <details>
+    <summary>What plans are available?</summary>
+    <p>Kesher has a free tier to get started, plus Pro, Max, and Premium plans that add more session time and features like recording. See current pricing for each tier in the app.</p>
+  </details>
+
+  <details>
+    <summary>How does billing work — monthly or one-time?</summary>
+    <p>Your choice, for every plan. "Billed monthly" auto-renews each month. "Pay once" charges you a single time for 30 days of access with no auto-renewal and no ongoing commitment — upgrade again whenever you like.</p>
+  </details>
+
+  <details>
+    <summary>Can I pay with Mobile Money?</summary>
+    <p>Yes, alongside card payment. Mobile Money is available for one-time ("Pay once") purchases. Recurring monthly subscriptions are card-only, since auto-renewal needs a payment method that can be safely charged again automatically, which Mobile Money doesn't currently support.</p>
+  </details>
+
+  <details>
+    <summary>Can I record my sessions?</summary>
+    <p>Yes, if you're on a paid plan and hosting from a desktop web browser. After the session ends, your recording is ready to preview and download from the summary screen.</p>
+  </details>
+
+  <details>
+    <summary>Is my data used for advertising?</summary>
+    <p>We don't sell your personal information to third parties. Our public marketing pages display ads through Google AdSense, which may use cookies to serve and measure those ads — see our <a href="/privacy.html">Privacy Policy</a> for the full details.</p>
+  </details>
+
+  <details>
+    <summary>How do I get help or ask something else?</summary>
+    <p>Reach out through the contact details in our <a href="/terms.html">Terms of Service</a>, or from within the app once you're signed in.</p>
+  </details>
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/how-it-works">How it works</a>
+  <a href="/privacy.html">Privacy</a>
+  <a href="/terms.html">Terms</a>
+</footer>
+
+</body>
+</html>
