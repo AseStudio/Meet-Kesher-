@@ -51,7 +51,7 @@ export function usePushSubscription() {
         if (!user || cancelled) return;
 
         const json = subscription.toJSON();
-        await supabase.from('push_subscriptions').upsert(
+        const { error } = await supabase.from('push_subscriptions').upsert(
           {
             user_id: user.id,
             endpoint: json.endpoint,
@@ -60,6 +60,7 @@ export function usePushSubscription() {
           },
           { onConflict: 'endpoint' }
         );
+        if (error) console.log('Push subscription save failed:', error.message, error);
       } catch (e) {
         console.log('Push subscription setup failed:', e.message);
       }

@@ -65,7 +65,7 @@ export function usePushSubscription() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user || cancelled) return;
 
-        await supabase.from('push_subscriptions').upsert(
+        const { error } = await supabase.from('push_subscriptions').upsert(
           {
             user_id: user.id,
             endpoint: expoPushToken, // see ASSUMPTION note above
@@ -75,6 +75,7 @@ export function usePushSubscription() {
           },
           { onConflict: 'endpoint' }
         );
+        if (error) console.log('Push subscription save failed:', error.message, error);
       } catch (e) {
         console.log('Push subscription setup failed:', e.message);
       }
