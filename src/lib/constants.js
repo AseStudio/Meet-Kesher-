@@ -44,9 +44,9 @@ export const PARTICIPANT_MINUTE_SLIDER_STEP = 10;
 // import across that boundary.
 export const MINUTE_PACKS = [
   { id: 'pm_60', minutes: 60, priceCedis: 13 },
-  { id: 'pm_120', minutes: 120, priceCedis: 25 },
+  { id: 'pm_120', minutes: 120, priceCedis: 25, badge: 'POPULAR' },
   { id: 'pm_300', minutes: 300, priceCedis: 62 },
   { id: 'pm_600', minutes: 600, priceCedis: 121 },
-  { id: 'pm_1200', minutes: 1200, priceCedis: 245 },
-  { id: 'pm_6000', minutes: 6000, priceCedis: 1230 },
+  { id: 'pm_1200', minutes: 1200, priceCedis: 245, badge: 'SAVE' },
+  { id: 'pm_6000', minutes: 6000, priceCedis: 1230, badge: 'BEST VALUE' },
 ];
