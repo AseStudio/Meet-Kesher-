@@ -65,28 +65,39 @@ export default function GuestJoinScreen({ navigation }) {
         return;
       }
 
-      // NOTE: guests aren't full account holders, but they do now get a
-      // real (anonymous) Supabase session — see signInAnonymously()
-      // below. That's what lets RLS on board_pages/board_strokes/
-      // graph_boards actually recognize them as a legitimate live-session
-      // participant, instead of the pre-RLS world where any anon-key
-      // request worked regardless of who it came from.
-      //
-      // It does NOT give guests anything to be banned by: bans key off
-      // banned_user_id, and an anonymous session is a fresh, unlinkable
-      // identity every time someone joins — there's nothing durable here
-      // to check against `bans`. A banned host's attendee could still
-      // get back in via this guest form. Flagging this rather than
-      // silently pretending it's covered — if that matters, banning
-      // guests needs its own identifier (device id, email match, etc.)
-      // since there's nothing else to key on here.
-      const { data: { user: existingUser } } = await supabase.auth.getUser();
-      if (!existingUser) {
-        const { error: anonError } = await supabase.auth.signInAnonymously();
+      // Guests get a real (anonymous) Supabase session via
+      // signInAnonymously() below — same as before, this is what lets
+      // RLS on board_pages/board_strokes/graph_boards recognize them as
+      // a legitimate participant. New here: because persistSession is on
+      // (see lib/supabase.js) and this anonymous session is stored in
+      // AsyncStorage like any other, it survives app restarts on the
+      // same device/browser — so the SAME guest rejoining from the same
+      // device gets the SAME auth.uid() every time, not a fresh one.
+      // That's stable enough to check against `bans` the same way a
+      // real account is. It's a device-level ban, not a person-level
+      // one — clearing app storage, reinstalling, or joining from a
+      // different device/browser resets it, same limitation any
+      // device-based ban has. Worth knowing, not a reason to skip it.
+      let { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
         if (anonError) {
           setError('Could not start your session. Please try again.');
           return;
         }
+        user = anonData.user;
+      }
+
+      const { data: ban } = await supabase
+        .from('bans')
+        .select('id')
+        .eq('host_id', session.host_id)
+        .eq('banned_user_id', user.id)
+        .maybeSingle();
+
+      if (ban) {
+        setError("You have been banned from this host's sessions.");
+        return;
       }
 
       const guest = { name: name.trim(), email: email.trim() || null };
