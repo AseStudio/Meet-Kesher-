@@ -65,14 +65,29 @@ export default function GuestJoinScreen({ navigation }) {
         return;
       }
 
-      // NOTE: guests aren't authenticated Supabase users, so there's no
-      // user.id here to check against `bans` (which keys off
-      // banned_user_id) the way AttendeeDashboard's flow does for signed-in
-      // attendees. A banned host's attendee could still get back in via
-      // this guest form. Flagging this rather than silently pretending
-      // it's covered — if that matters, banning guests needs its own
-      // identifier (device id, email match, etc.) since there's nothing
-      // else to key on here.
+      // NOTE: guests aren't full account holders, but they do now get a
+      // real (anonymous) Supabase session — see signInAnonymously()
+      // below. That's what lets RLS on board_pages/board_strokes/
+      // graph_boards actually recognize them as a legitimate live-session
+      // participant, instead of the pre-RLS world where any anon-key
+      // request worked regardless of who it came from.
+      //
+      // It does NOT give guests anything to be banned by: bans key off
+      // banned_user_id, and an anonymous session is a fresh, unlinkable
+      // identity every time someone joins — there's nothing durable here
+      // to check against `bans`. A banned host's attendee could still
+      // get back in via this guest form. Flagging this rather than
+      // silently pretending it's covered — if that matters, banning
+      // guests needs its own identifier (device id, email match, etc.)
+      // since there's nothing else to key on here.
+      const { data: { user: existingUser } } = await supabase.auth.getUser();
+      if (!existingUser) {
+        const { error: anonError } = await supabase.auth.signInAnonymously();
+        if (anonError) {
+          setError('Could not start your session. Please try again.');
+          return;
+        }
+      }
 
       const guest = { name: name.trim(), email: email.trim() || null };
 

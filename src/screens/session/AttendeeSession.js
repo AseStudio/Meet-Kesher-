@@ -566,23 +566,30 @@ export default function AttendeeSession({ navigation, route }) {
 
     // Broadcast identity so host can map our Agora UID to our profile
     try {
-      // Guests were never handled here before — supabase.auth.getUser()
-      // returns no user for them (no real Supabase session at all), so
-      // `.eq('id', me.id)` would throw the instant it ran, silently
-      // swallowed by the catch below. That meant the host never
-      // received an identity broadcast for a guest at all — no name,
-      // no isGuest flag, nothing. Handling both branches explicitly here
-      // is what finally lets the host's side know a participant is a
-      // guest, which the minute-penalty tracking below depends on.
+      // Guests now carry a real (anonymous) Supabase session — established
+      // in GuestJoinScreen.js via signInAnonymously() before they ever
+      // get here — so supabase.auth.getUser() returns a real user for
+      // both guests and signed-in attendees. What differs is what we do
+      // with it: signed-in attendees get their real profile name; guests
+      // get the name they typed on the join form, since an anonymous
+      // auth user has no `profiles` row to look up (that .single() call
+      // would just fail for them).
       let identityId = null;
       let identityName = 'Attendee';
-      if (!isGuest) {
-        const { data: { user: me } } = await supabase.auth.getUser();
-        const { data: profile } = await supabase
-          .from('profiles').select('full_name').eq('id', me.id).single();
+      const { data: { user: me } } = await supabase.auth.getUser();
+      if (me) {
         identityId = me.id;
-        identityName = profile?.full_name || 'Attendee';
-      } else {
+        if (!isGuest) {
+          const { data: profile } = await supabase
+            .from('profiles').select('full_name').eq('id', me.id).single();
+          identityName = profile?.full_name || 'Attendee';
+        } else {
+          identityName = guest?.name || 'Guest';
+        }
+      } else if (isGuest) {
+        // Shouldn't happen — GuestJoinScreen signs guests in before
+        // navigating here — but don't crash the identity broadcast if
+        // it somehow does; fall back to name-only, no created_by-able id.
         identityName = guest?.name || 'Guest';
       }
 

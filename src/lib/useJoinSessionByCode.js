@@ -52,8 +52,19 @@ export function useJoinSessionByCode(navigation) {
 
       const { data: { user } } = await supabase.auth.getUser();
 
-      // Check ban BEFORE adding them as an attendee
-      if (user) {
+      // This flow is only ever reached from AttendeeDashboard/HostDashboard,
+      // both of which require being signed in — so `user` being null here
+      // should be rare (an expired/revoked token mid-session, say). It used
+      // to silently skip the ban check and the session_attendees insert and
+      // still let the join proceed; now it stops and asks them to sign back
+      // in instead of quietly bypassing both.
+      if (!user) {
+        setJoinError('Your session has expired. Please sign in again.');
+        setJoinLoading(false);
+        return;
+      }
+
+      {
         const { data: ban } = await supabase
           .from('bans')
           .select('id')
@@ -97,7 +108,6 @@ export function useJoinSessionByCode(navigation) {
           }
         }
       }
-
       if (session.status === 'live') {
         navigation.navigate('AttendeeSession', { session });
       } else {
