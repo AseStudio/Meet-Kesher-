@@ -5,20 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-  success: colors.green,
-};
 
 export default function ChannelsTab({ navigation, isHost, isVerified }) {
   const [query, setQuery] = useState('');
@@ -174,7 +163,7 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface,
     borderRadius: 13, borderWidth: 1, borderColor: palette.line,
-    marginHorizontal: 20, paddingHorizontal: 14, marginBottom: 14,
+    marginHorizontal: 20, paddingHorizontal: 14, marginBottom: 14, ...cardShadow,
   },
   searchInput: { flex: 1, paddingVertical: 12, fontSize: 14, color: palette.ink, outlineStyle: 'none' },
 
@@ -187,7 +176,7 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 20, paddingBottom: 20 },
   card: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface,
-    borderRadius: 16, padding: 14, marginBottom: 10, gap: 12,
+    borderRadius: 16, padding: 14, marginBottom: 10, gap: 12, ...cardShadow,
   },
   cardIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
   cardBody: { flex: 1 },

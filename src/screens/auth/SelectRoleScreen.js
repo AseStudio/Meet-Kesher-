@@ -5,27 +5,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
 import LogoMark from '../../components/LogoMark';
-
-// ─────────────────────────────────────────────────────────────────────
-// Same tokens as SignUpScreen/LoginScreen — this screen is styled to
-// read as a continuation of sign-up, not a separate detour.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  neutralText: colors.grey,
-};
 
 // ─────────────────────────────────────────────────────────────────────
 // Only ever reached one way: SplashScreen sends a signed-in user here

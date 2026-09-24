@@ -4,6 +4,7 @@ import Slider from '@react-native-community/slider';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import {
@@ -14,23 +15,6 @@ import {
   PARTICIPANT_MINUTE_SLIDER_STEP,
 } from '../../lib/constants';
 
-const palette = {
-  primary: colors.primary,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
-
-const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
-  android: { elevation: 3 },
-  default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
-});
 
 // Smallest-to-largest regardless of declaration order in constants.js —
 // a predictable ascending ladder, matching the reference design.

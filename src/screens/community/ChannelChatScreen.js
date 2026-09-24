@@ -5,20 +5,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { generateSessionCode, generateSessionPassword } from '../../lib/sessionCodes';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 /**
  * Route params: { channelId, channelName }
@@ -277,12 +267,13 @@ const styles = StyleSheet.create({
   startSessionBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: palette.primary, marginHorizontal: 20, borderRadius: 13, paddingVertical: 12, marginBottom: 10,
+    ...cardShadow,
   },
   startSessionBtnText: { color: palette.surface, fontWeight: '700', fontSize: 13.5 },
 
   listContent: { paddingHorizontal: 20, paddingBottom: 16, flexGrow: 1 },
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10 },
-  messageBubble: { backgroundColor: palette.surface, borderRadius: 14, borderTopLeftRadius: 4, padding: 12, maxWidth: '82%' },
+  messageBubble: { backgroundColor: palette.surface, borderRadius: 14, borderTopLeftRadius: 4, padding: 12, maxWidth: '82%', ...cardShadow },
   messageBody: { fontSize: 14, color: palette.ink, lineHeight: 20 },
   reactionBtn: { padding: 4 },
 
@@ -297,7 +288,7 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: palette.canvas, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10,
     fontSize: 14, color: palette.ink, maxHeight: 100, outlineStyle: 'none',
   },
-  sendBtn: { backgroundColor: palette.primary, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { backgroundColor: palette.primary, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', ...cardShadow },
 
   reactOnlyNotice: { padding: 16, borderTopWidth: 1, borderTopColor: palette.line, backgroundColor: palette.surface },
   reactOnlyNoticeText: { fontSize: 12, color: palette.inkMuted, textAlign: 'center' },

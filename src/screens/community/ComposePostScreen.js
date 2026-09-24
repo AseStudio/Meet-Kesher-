@@ -7,21 +7,9 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  danger: colors.red,
-  neutralText: colors.grey,
-};
 
 const MAX_LEN = 500;
 const MAX_IMAGES = 6;
@@ -325,7 +313,7 @@ const styles = StyleSheet.create({
   cancelBtn: { paddingVertical: 6, paddingRight: 8 },
   cancelText: { fontSize: 14.5, color: palette.inkMuted, fontWeight: '600' },
   title: { fontSize: 15.5, fontWeight: '800', color: palette.ink },
-  postBtn: { backgroundColor: palette.primary, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 8, minWidth: 64, alignItems: 'center' },
+  postBtn: { backgroundColor: palette.primary, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 8, minWidth: 64, alignItems: 'center', ...cardShadow },
   postBtnDisabled: { opacity: 0.4 },
   postBtnText: { color: palette.surface, fontWeight: '800', fontSize: 13.5 },
 
@@ -337,7 +325,7 @@ const styles = StyleSheet.create({
   },
 
   mediaRow: { marginTop: 12 },
-  imageThumbWrap: { marginRight: 10 },
+  imageThumbWrap: { marginRight: 10, borderRadius: 12, ...cardShadow },
   imageThumb: { width: 84, height: 84, borderRadius: 12, backgroundColor: palette.line },
   removeMediaBtn: {
     position: 'absolute', top: -6, right: -6,
@@ -349,7 +337,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: palette.primarySoft, borderRadius: 14, padding: 12, marginTop: 12,
   },
-  videoIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center' },
+  videoIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center', ...cardShadow },
   videoName: { fontSize: 13.5, fontWeight: '700', color: palette.ink },
   videoSize: { fontSize: 11.5, color: palette.inkMuted, marginTop: 2 },
   removeVideoBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },

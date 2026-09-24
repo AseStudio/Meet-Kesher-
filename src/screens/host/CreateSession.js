@@ -6,6 +6,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, softShadow as cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { getPlan, getPlanMaxAttendees } from '../../lib/constants';
@@ -14,25 +15,7 @@ import { getPlan, getPlanMaxAttendees } from '../../lib/constants';
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
 // so this screen reads as part of the same product, not a one-off.
 // ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  amber: colors.yellow,
-  amberSoft: '#FFF3DE',
-  neutralSoft: colors.greyLight,
-  neutralText: colors.grey,
-};
+
 
 const modes = [
   { id: 'classroom', label: 'Classroom', icon: 'school-outline', set: 'ion', color: palette.primary, soft: palette.primarySoft, desc: 'Lectures, presentations & assignments.' },
@@ -86,15 +69,10 @@ export default function CreateSession({ navigation }) {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: profile } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
+      const { data: profile } = await supabase.from('profiles').select('plan, is_premium').eq('id', user.id).maybeSingle();
       const nextPlan = profile?.plan || 'free';
       setPlan(nextPlan);
-      // is_premium is a DB column nothing ever writes after checkout —
-      // the Paystack webhook only updates profiles.plan — so it's always
-      // false/null. Deriving "premium" from plan itself, the same way
-      // CommunityScreen already does, is what actually reflects a real
-      // upgrade.
-      setIsPremium(nextPlan !== 'free');
+      setIsPremium(!!profile?.is_premium);
 
       // Default the counter to this plan's cap so hosts see the most
       // attendees they can have by default; if they'd already nudged the
@@ -414,11 +392,7 @@ export default function CreateSession({ navigation }) {
   );
 }
 
-const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 10 },
-  android: { elevation: 2 },
-  default: { boxShadow: '0 4px 12px rgba(42,26,107,0.06)' },
-});
+
 
 const launchShadow = Platform.select({
   ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.26, shadowRadius: 16 },

@@ -2,17 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  success: colors.green,
-};
 
 // The actual plan upgrade never happens the instant Paystack redirects
 // back here — it happens when the webhook fires, which is usually fast
@@ -132,7 +123,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   title: { fontSize: 20, fontWeight: '800', color: palette.ink, textAlign: 'center', marginTop: 8 },
   subtitle: { fontSize: 14, color: palette.inkMuted, textAlign: 'center', lineHeight: 20, maxWidth: 320 },
-  successIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: palette.success, alignItems: 'center', justifyContent: 'center' },
-  btn: { backgroundColor: palette.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, marginTop: 12 },
+  successIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: palette.success, alignItems: 'center', justifyContent: 'center', ...cardShadow },
+  btn: { backgroundColor: palette.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, marginTop: 12, ...cardShadow },
   btnText: { color: palette.surface, fontSize: 15, fontWeight: '800' },
 });

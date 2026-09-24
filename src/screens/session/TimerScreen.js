@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getPlan } from '../../lib/constants';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 
@@ -9,7 +8,6 @@ export default function TimerScreen({ navigation, route }) {
   const session = route.params?.session;
   const [hostMinutes, setHostMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
-  const [plan, setPlan] = useState('free');
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [notificationShown, setNotificationShown] = useState({ five: false, zero: false });
@@ -24,17 +22,13 @@ export default function TimerScreen({ navigation, route }) {
           return;
         }
 
-        // Fetch plan (is_premium is a DB column nothing ever writes
-        // after checkout — the webhook only updates profiles.plan — so
-        // it's always false/null; derive "premium" from plan instead,
-        // same as CommunityScreen/CreateSession).
+        // Fetch premium status
         const { data: profile } = await supabase
           .from('profiles')
-          .select('plan')
+          .select('is_premium')
           .eq('id', user.id)
           .maybeSingle();
-        setIsPremium(!!profile?.plan && profile.plan !== 'free');
-        setPlan(profile?.plan || 'free');
+        setIsPremium(!!profile?.is_premium);
 
         // Fetch hosting minutes balance
         const { data: usageRow } = await supabase.rpc('get_my_usage');
@@ -192,8 +186,8 @@ export default function TimerScreen({ navigation, route }) {
           <Ionicons name="information-circle-outline" size={17} color="rgba(255,255,255,0.6)" />
           <Text style={styles.infoText}>
             {isPremium 
-              ? `You're on the ${getPlan(plan).name} plan — ${getPlan(plan).hostMinutes} hosting minutes per session.`
-              : 'Free hosts get 30 minutes per session. Upgrade for more hosting time.'
+              ? 'You have unlimited session minutes as a Premium user.'
+              : 'Free users get 30 minutes per month. Upgrade to Premium for unlimited sessions.'
             }
           </Text>
         </View>
@@ -215,7 +209,15 @@ const styles = StyleSheet.create({
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: colors.white, letterSpacing: -0.2 },
   content: { flex: 1, padding: 24, alignItems: 'center', gap: 20 },
-  minutesRing: { width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative' },
+  minutesRing: {
+    width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative',
+    ...Platform.select({
+      ios: { shadowColor: colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.35, shadowRadius: 24 },
+      android: { elevation: 10 },
+      default: { boxShadow: `0 0 40px ${colors.primary}55` },
+    }),
+  },
   minutesRingRed: { borderColor: colors.red },
   minutesInner: { alignItems: 'center', zIndex: 2 },
   minutesDisplay: { fontSize: 72, fontWeight: '800', color: colors.white, fontVariant: ['tabular-nums'] },

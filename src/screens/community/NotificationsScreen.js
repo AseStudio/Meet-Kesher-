@@ -5,19 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 function getInitials(name) {
   return (name || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
@@ -135,7 +125,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '800', color: palette.ink },
 
   list: { paddingHorizontal: 16, paddingBottom: 20 },
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: palette.surface, borderRadius: 14, padding: 12, marginBottom: 8 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: palette.surface, borderRadius: 14, padding: 12, marginBottom: 8, ...cardShadow },
   rowUnread: { backgroundColor: palette.primarySoft },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: palette.line },
   avatarText: { fontSize: 12.5, fontWeight: '800', color: palette.primary },

@@ -6,29 +6,13 @@ import {
 import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import FeedAdUnit from '../../components/FeedAdUnit';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  amber: colors.yellow,
-  amberSoft: '#FFF3DE',
-  premium: '#7C3AED',
-  premiumSoft: '#F1E8FE',
-  danger: colors.red,
-};
 
 // Note: the actual auto-hide threshold lives in the report_feed_post()
 // Postgres function now, not here — keep the two in sync if you change
@@ -794,7 +778,7 @@ const styles = StyleSheet.create({
   dismissBtn: { backgroundColor: palette.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   dismissBtnText: { color: palette.neutralText, fontWeight: '700', fontSize: 12 },
 
-  postCard: { backgroundColor: palette.surface, borderRadius: 16, padding: 14, marginBottom: 10 },
+  postCard: { backgroundColor: palette.surface, borderRadius: 16, padding: 14, marginBottom: 10, ...cardShadow },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   postIconWrap: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   postKind: { fontSize: 11.5, fontWeight: '700', color: palette.inkMuted },
@@ -820,7 +804,7 @@ const styles = StyleSheet.create({
   reactionText: { fontSize: 12.5, color: palette.neutralText, fontWeight: '600' },
 
   upsellCard: { borderWidth: 1.5, borderColor: palette.premiumSoft, backgroundColor: palette.premiumSoft },
-  upgradeBtn: { flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 6, backgroundColor: palette.premium, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11, marginTop: 10 },
+  upgradeBtn: { flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 6, backgroundColor: palette.premium, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11, marginTop: 10, ...cardShadow },
   upgradeBtnText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
 
   emptyState: { paddingVertical: 50, alignItems: 'center' },

@@ -4,37 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { sanitizeUsernameInput, isValidUsername } from '../../lib/username';
 import { getPlan } from '../../lib/constants';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — same tokens/mapping as the other production-pass screens
-// (HostDashboard / AttendeeDashboard / CreateSession) so this reads as
-// part of the same product.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  amber: colors.yellow,
-  amberSoft: '#FFF3DE',
-  premium: '#7C3AED',
-  premiumSoft: '#F1E8FE',
-  neutralSoft: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 // Matches the caps enforce_attend_cap() checks server-side — kept in
 // sync manually since the DB function's CASE statement isn't something
@@ -83,8 +57,7 @@ export default function Profile({ navigation }) {
   // `palette` is a stable module-level object, so these only need to be
   // computed once (not on every render — this screen re-renders often
   // due to the profile/usage/username state above).
-  const cardShadow = useMemo(() => getCardShadow(), []);
-  const styles = useMemo(() => getStyles(themePalette, cardShadow), [themePalette, cardShadow]);
+  const styles = useMemo(() => getStyles(themePalette, cardShadow), [themePalette]);
 
   useEffect(() => {
     loadProfile();
@@ -576,13 +549,6 @@ export default function Profile({ navigation }) {
     </View>
   );
 }
-
-// Helper function to create cardShadow (light mode only)
-const getCardShadow = () => Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
-  android: { elevation: 3 },
-  default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
-});
 
 // Helper function to create styles (light mode only)
 // `cardShadow` is passed in explicitly rather than relied on as a closure

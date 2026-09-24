@@ -3,31 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, softShadow as cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { ModeIcon, getModeColor, getModeSoft } from '../../lib/iconMeta';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — same tokens/mapping as the other production-pass screens.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  amber: colors.yellow,
-  amberSoft: '#FFF3DE',
-  neutralSoft: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 export default function EndSession({ navigation, route }) {
   const session = route.params?.session;
@@ -36,33 +15,10 @@ export default function EndSession({ navigation, route }) {
   const [duration, setDuration] = useState('');
   const [loading, setLoading] = useState(true);
   const [downloadingRecording, setDownloadingRecording] = useState(false);
-  const [recordingPreviewUrl, setRecordingPreviewUrl] = useState(null);
-  const [recordingDismissed, setRecordingDismissed] = useState(false);
 
   useEffect(() => {
     loadSessionSummary();
   }, []);
-
-  // Signed URL for the inline preview player — separate from the one
-  // downloadRecording generates on tap, since this one needs to exist
-  // immediately on load rather than only after the host decides to
-  // download. Web only: recording itself only ever runs in a desktop
-  // web browser (see SessionMain's recordingSupported check), so
-  // recordingPath is never set on native in the first place.
-  useEffect(() => {
-    if (!recordingPath || Platform.OS !== 'web') return;
-    (async () => {
-      try {
-        const { data, error } = await supabase.storage
-          .from('session-recordings')
-          .createSignedUrl(recordingPath, 60 * 60);
-        if (!error) setRecordingPreviewUrl(data.signedUrl);
-      } catch (e) {
-        // Preview is a nice-to-have — the Download button below still
-        // works independently by generating its own signed URL on tap.
-      }
-    })();
-  }, [recordingPath]);
 
   // Generated fresh on tap rather than once on mount — a signed URL is
   // time-limited, and there's no reason to burn that window before the
@@ -210,60 +166,26 @@ export default function EndSession({ navigation, route }) {
           </>
         )}
 
-        {/* Recording preview */}
-        {recordingPath && !recordingDismissed && (
-          <View style={styles.recordingCard}>
-            <Text style={styles.recordingCardTitle}>Your recording</Text>
-
-            {Platform.OS === 'web' && recordingPreviewUrl ? (
-              <video
-                src={recordingPreviewUrl}
-                controls
-                style={{ width: '100%', maxHeight: 260, borderRadius: 14, backgroundColor: '#000' }}
-              />
-            ) : (
-              <View style={styles.recordingPreviewFallback}>
-                <Ionicons name="film-outline" size={28} color={palette.primary} />
-                <Text style={styles.recordingPreviewFallbackText}>
-                  {Platform.OS === 'web' ? 'Loading preview…' : 'Preview available on web'}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.recordingCardActions}>
-              <TouchableOpacity
-                style={styles.recordingBtn}
-                onPress={downloadRecording}
-                disabled={downloadingRecording}
-                activeOpacity={0.85}
-              >
-                {downloadingRecording
-                  ? <ActivityIndicator color={palette.surface} />
-                  : (
-                    <>
-                      <Ionicons name="download-outline" size={17} color={palette.surface} />
-                      <Text style={styles.recordingBtnText}>Download Recording</Text>
-                    </>
-                  )
-                }
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dismissBtn}
-                onPress={() => setRecordingDismissed(true)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.dismissBtnText}>Dismiss</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.recordingNote}>
-              Your recording minutes for this session have already been deducted — that applies whether you download this video or dismiss it now.
-            </Text>
-          </View>
-        )}
-
         {/* Action Buttons */}
         <View style={styles.buttonCol}>
+          {recordingPath && (
+            <TouchableOpacity
+              style={styles.recordingBtn}
+              onPress={downloadRecording}
+              disabled={downloadingRecording}
+              activeOpacity={0.85}
+            >
+              {downloadingRecording
+                ? <ActivityIndicator color={palette.surface} />
+                : (
+                  <>
+                    <Ionicons name="download-outline" size={17} color={palette.surface} />
+                    <Text style={styles.recordingBtnText}>Download Recording</Text>
+                  </>
+                )
+              }
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={() => navigation.navigate('SubmissionsInbox')}
@@ -294,12 +216,6 @@ export default function EndSession({ navigation, route }) {
     </View>
   );
 }
-
-const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12 },
-  android: { elevation: 2 },
-  default: { boxShadow: '0 5px 14px rgba(42,26,107,0.07)' },
-});
 
 const iconShadow = Platform.select({
   ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 },
@@ -334,16 +250,7 @@ const styles = StyleSheet.create({
   avatarText: { color: palette.surface, fontWeight: '700', fontSize: 13 },
   avatarName: { fontSize: 10, color: palette.inkMuted, maxWidth: 48, fontWeight: '500' },
   buttonCol: { width: '100%', gap: 12 },
-  recordingCard: { width: '100%', backgroundColor: palette.surface, borderRadius: 20, padding: 16, marginBottom: 24, gap: 12, ...cardShadow },
-  recordingCardTitle: { fontSize: 15, fontWeight: '800', color: palette.ink, letterSpacing: -0.2 },
-  recordingPreviewVideo: { width: '100%', maxHeight: 260, borderRadius: 14, backgroundColor: '#000' },
-  recordingPreviewFallback: { width: '100%', height: 140, borderRadius: 14, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  recordingPreviewFallbackText: { color: palette.inkMuted, fontSize: 13, fontWeight: '600' },
-  recordingCardActions: { flexDirection: 'row', gap: 10 },
-  dismissBtn: { flex: 1, backgroundColor: palette.neutralSoft, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  dismissBtnText: { color: palette.ink, fontSize: 15.5, fontWeight: '700' },
-  recordingNote: { fontSize: 12, color: palette.inkMuted, lineHeight: 17, fontWeight: '500' },
-  recordingBtn: { flex: 1, flexDirection: 'row', gap: 8, backgroundColor: '#7C3AED', paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  recordingBtn: { flexDirection: 'row', gap: 8, backgroundColor: '#7C3AED', paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   recordingBtnText: { color: palette.surface, fontSize: 15.5, fontWeight: '800', letterSpacing: -0.2 },
   primaryBtn: { flexDirection: 'row', gap: 8, backgroundColor: palette.primary, paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', ...primaryShadow },
   primaryBtnText: { color: palette.surface, fontSize: 15.5, fontWeight: '800', letterSpacing: -0.2 },

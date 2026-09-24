@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { ModeIcon, getModeColor } from '../../lib/iconMeta';
 import EnteringSessionTransition from '../../components/EnteringSessionTransition';
@@ -138,34 +139,33 @@ export default function GuestWaitingScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  container: { flex: 1, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', padding: 32 },
   iconWrap: {
     width: 92, height: 92, borderRadius: 46,
-    backgroundColor: colors.greyLight,
+    backgroundColor: palette.line,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 24,
   },
   pulseRing: {
     position: 'absolute',
     width: 92, height: 92, borderRadius: 46,
-    backgroundColor: colors.primary,
+    backgroundColor: palette.primary,
   },
-  title: { fontSize: 24, fontWeight: '800', color: colors.text, textAlign: 'center', marginBottom: 10 },
-  subtitle: { fontSize: 14.5, color: colors.textLight, textAlign: 'center', lineHeight: 21, maxWidth: 340, marginBottom: 24 },
+  title: { fontSize: 24, fontWeight: '800', color: palette.ink, textAlign: 'center', marginBottom: 10 },
+  subtitle: { fontSize: 14.5, color: palette.inkMuted, textAlign: 'center', lineHeight: 21, maxWidth: 340, marginBottom: 24 },
   sessionCard: {
     width: '100%', maxWidth: 340,
-    backgroundColor: colors.white,
+    backgroundColor: palette.surface,
     borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
-    borderColor: colors.greyLight,
     marginBottom: 20,
+    ...cardShadow,
   },
   sessionCardTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
-  sessionMode: { fontSize: 11, fontWeight: '700', color: colors.primary, textTransform: 'capitalize' },
-  sessionTitle: { fontSize: 16, fontWeight: '800', color: colors.text },
-  sessionGuest: { fontSize: 12.5, color: colors.textLight, marginTop: 4, fontWeight: '500' },
+  sessionMode: { fontSize: 11, fontWeight: '700', color: palette.primary, textTransform: 'capitalize' },
+  sessionTitle: { fontSize: 16, fontWeight: '800', color: palette.ink },
+  sessionGuest: { fontSize: 12.5, color: palette.inkMuted, marginTop: 4, fontWeight: '500' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
-  statusText: { fontSize: 12.5, color: colors.textLight, fontWeight: '600' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.primary },
+  statusText: { fontSize: 12.5, color: palette.inkMuted, fontWeight: '600' },
 });

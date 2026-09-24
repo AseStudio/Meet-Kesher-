@@ -2,22 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import ChannelsTab from './ChannelsTab';
 import FeedTab from './FeedTab';
-
-// Same layering-on-top-of-theme approach as the dashboards, so this
-// screen matches them visually without touching theme/colors.js.
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 /**
  * Reached from the second bottom-nav button on both AttendeeDashboard
@@ -105,7 +93,7 @@ export default function CommunityScreen({ navigation, route }) {
             onPress={() => navigation.navigate('Notifications')}
             activeOpacity={0.75}
           >
-            <Ionicons name="notifications-outline" size={21} color={palette.ink} />
+            <Ionicons name="notifications-outline" size={20} color={palette.primary} />
             {unreadCount > 0 && (
               <View style={styles.bellBadge}>
                 <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
@@ -195,15 +183,15 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 },
   title: { fontSize: 23, fontWeight: '800', color: palette.ink, letterSpacing: -0.4 },
   topBarActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  bellBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.line, alignItems: 'center', justifyContent: 'center' },
+  bellBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center', ...cardShadow },
   bellBadge: { position: 'absolute', top: -3, right: -3, minWidth: 17, height: 17, borderRadius: 8.5, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: palette.canvas },
   bellBadgeText: { color: '#fff', fontSize: 9.5, fontWeight: '800' },
-  newChannelBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: palette.primary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
+  newChannelBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: palette.primary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, ...cardShadow },
   newChannelBtnText: { color: palette.surface, fontWeight: '700', fontSize: 12.5 },
 
   toggleRow: { flexDirection: 'row', marginHorizontal: 20, backgroundColor: palette.line, borderRadius: 13, padding: 3, marginBottom: 12 },
   toggleBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10 },
-  toggleBtnActive: { backgroundColor: palette.surface },
+  toggleBtnActive: { backgroundColor: palette.surface, ...cardShadow },
   toggleText: { fontSize: 13.5, fontWeight: '700', color: palette.neutralText },
   toggleTextActive: { color: palette.ink },
 

@@ -5,19 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 export default function CreateChannelScreen({ navigation }) {
   const [name, setName] = useState('');
@@ -138,8 +128,11 @@ const styles = StyleSheet.create({
   },
   textArea: { minHeight: 90, textAlignVertical: 'top' },
 
-  switchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 18, gap: 12 },
+  switchRow: {
+    flexDirection: 'row', alignItems: 'center', marginTop: 18, gap: 12,
+    backgroundColor: palette.surface, borderRadius: 14, padding: 14, ...cardShadow,
+  },
 
-  createBtn: { backgroundColor: palette.primary, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 26 },
+  createBtn: { backgroundColor: palette.primary, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 26, ...cardShadow },
   createBtnText: { color: palette.surface, fontWeight: '800', fontSize: 15 },
 });

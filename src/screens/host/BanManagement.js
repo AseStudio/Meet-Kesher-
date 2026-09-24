@@ -5,29 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, softShadow as cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — same tokens/mapping as the other production-pass screens.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  neutralSoft: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 export default function BanManagement({ navigation }) {
   const [bans, setBans] = useState([]);
@@ -165,12 +145,6 @@ export default function BanManagement({ navigation }) {
     </View>
   );
 }
-
-const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12 },
-  android: { elevation: 2 },
-  default: { boxShadow: '0 5px 14px rgba(42,26,107,0.07)' },
-});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.canvas },

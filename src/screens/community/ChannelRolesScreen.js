@@ -5,19 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 /**
  * Route params: { channelId, channelName }
@@ -142,7 +132,7 @@ const styles = StyleSheet.create({
   helperText: { fontSize: 12, color: palette.inkMuted, paddingHorizontal: 20, marginBottom: 14, lineHeight: 17 },
 
   listContent: { paddingHorizontal: 20, paddingBottom: 20 },
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface, borderRadius: 14, padding: 12, marginBottom: 8, gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface, borderRadius: 14, padding: 12, marginBottom: 8, gap: 12, ...cardShadow },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 14, fontWeight: '700', color: palette.primary },
   name: { fontSize: 13.5, fontWeight: '700', color: palette.ink },

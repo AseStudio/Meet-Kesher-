@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 
 // Where a guest (no account, no dashboard to go "back" to) lands once
 // they're no longer in a live session — the session ended, the host
@@ -42,13 +43,14 @@ export default function SessionEndedGuestScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <View style={styles.iconWrap}>
-        <Ionicons name={icon} size={48} color={colors.primary} />
+        <Ionicons name={icon} size={48} color={palette.primary} />
       </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.subtitle}>{subtitle}</Text>
       {session?.title && (
         <View style={styles.sessionBadge}>
-          <Text style={styles.sessionBadgeText}>📋 {session.title}</Text>
+          <Ionicons name="document-text-outline" size={13} color={palette.inkMuted} />
+          <Text style={styles.sessionBadgeText}>{session.title}</Text>
         </View>
       )}
 
@@ -70,16 +72,19 @@ export default function SessionEndedGuestScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  iconWrap: { width: 100, height: 100, borderRadius: 50, backgroundColor: colors.greyLight, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: '800', color: colors.text, textAlign: 'center', marginBottom: 12 },
-  subtitle: { fontSize: 15, color: colors.textLight, textAlign: 'center', lineHeight: 22, marginBottom: 20 },
-  sessionBadge: { backgroundColor: colors.greyLight, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginBottom: 28 },
-  sessionBadgeText: { fontSize: 13, fontWeight: '600', color: colors.text },
+  container: { flex: 1, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  iconWrap: { width: 100, height: 100, borderRadius: 50, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
+  title: { fontSize: 26, fontWeight: '800', color: palette.ink, textAlign: 'center', marginBottom: 12 },
+  subtitle: { fontSize: 15, color: palette.inkMuted, textAlign: 'center', lineHeight: 22, marginBottom: 20 },
+  sessionBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: palette.surface, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, marginBottom: 28, ...cardShadow,
+  },
+  sessionBadgeText: { fontSize: 13, fontWeight: '600', color: palette.ink },
   actions: { width: '100%', maxWidth: 340, gap: 12 },
-  primaryBtn: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
-  primaryBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
-  secondaryBtn: { backgroundColor: 'transparent', paddingVertical: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1.5, borderColor: colors.primary },
-  secondaryBtnText: { color: colors.primary, fontSize: 16, fontWeight: '700' },
-  hint: { fontSize: 12, color: colors.textLight, textAlign: 'center', lineHeight: 18, marginTop: 24, maxWidth: 320 },
+  primaryBtn: { backgroundColor: palette.primary, paddingVertical: 16, borderRadius: 14, alignItems: 'center', ...cardShadow },
+  primaryBtnText: { color: palette.surface, fontSize: 16, fontWeight: '700' },
+  secondaryBtn: { backgroundColor: 'transparent', paddingVertical: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1.5, borderColor: palette.primary },
+  secondaryBtnText: { color: palette.primary, fontSize: 16, fontWeight: '700' },
+  hint: { fontSize: 12, color: palette.inkMuted, textAlign: 'center', lineHeight: 18, marginTop: 24, maxWidth: 320 },
 });

@@ -9,27 +9,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — same tokens/mapping as the other production-pass screens.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  neutralText: colors.grey,
-};
 
 export default function VerifyEmailScreen({ navigation, route }) {
   const email = route.params?.email || '';

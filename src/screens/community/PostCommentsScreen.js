@@ -5,20 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
-
-const palette = {
-  primary: colors.primary,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  danger: colors.red,
-  neutralText: colors.grey,
-};
 
 function getInitials(name) {
   return (name || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
@@ -277,7 +266,7 @@ const styles = StyleSheet.create({
   avatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: palette.primarySoft, alignItems: 'center', justifyContent: 'center' },
   avatarSmall: { width: 24, height: 24, borderRadius: 12 },
   avatarText: { fontSize: 11.5, fontWeight: '800', color: palette.primary },
-  commentBubble: { flex: 1, backgroundColor: palette.surface, borderRadius: 14, padding: 11 },
+  commentBubble: { flex: 1, backgroundColor: palette.surface, borderRadius: 14, padding: 11, ...cardShadow },
   commentHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 3 },
   commentAuthor: { fontSize: 12.5, fontWeight: '700', color: palette.ink },
   commentHandle: { fontSize: 11.5, color: palette.neutralText, fontWeight: '500' },
@@ -305,6 +294,6 @@ const styles = StyleSheet.create({
     backgroundColor: palette.canvas, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10,
     outlineStyle: 'none',
   },
-  sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.primary, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.primary, alignItems: 'center', justifyContent: 'center', ...cardShadow },
   sendBtnDisabled: { opacity: 0.4 },
 });

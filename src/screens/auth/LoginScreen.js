@@ -7,30 +7,10 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { signInWithGoogle } from '../../lib/oauth';
-import LogoMark from '../../components/LogoMark';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — same tokens/mapping as the other production-pass screens
-// (HostDashboard / AttendeeDashboard / CreateSession / Profile).
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  neutralText: colors.grey,
-};
-
-export default function LoginScreen({ navigation }) {
+import LogoMark from '../../components/LogoMark';export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

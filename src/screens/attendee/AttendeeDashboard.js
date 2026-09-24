@@ -3,38 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Activi
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
+import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { useJoinSessionByCode } from '../../lib/useJoinSessionByCode';
-
-// ─────────────────────────────────────────────────────────────────────
-// PALETTE — layered on top of theme/colors.js rather than editing it
-// blindly (that file's real values weren't available while building
-// this). colors.primary is assumed to be the same purple used across
-// the session screens (~#5B2EFF). If your real theme differs, this is
-// the one object to swap — every color below flows from it.
-// ─────────────────────────────────────────────────────────────────────
-const palette = {
-  primary: colors.primary,
-  primaryBright: colors.primaryLight,
-  primaryDeep: colors.primaryDark,
-  primarySoft: colors.background,
-  primarySoftBorder: colors.greyLight,
-  ink: colors.text,
-  inkMuted: colors.textLight,
-  surface: colors.white,
-  canvas: colors.background,
-  line: colors.greyLight,
-  success: colors.green,
-  successSoft: '#E7FBF0',
-  danger: colors.red,
-  dangerSoft: '#FFE9E9',
-  live: colors.red,
-  liveSoft: '#FFE9E9',
-  amber: colors.yellow,
-  amberSoft: '#FFF3DE',
-  neutralSoft: colors.greyLight,
-  neutralText: colors.grey,
-};
 
 // Mode → icon + color. Deliberately drawn ONLY from tokens that already
 // exist in theme/colors.js (primary / green / yellow / red) rather than
@@ -317,11 +288,7 @@ export default function AttendeeDashboard({ navigation }) {
   );
 }
 
-const cardShadow = Platform.select({
-  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14 },
-  android: { elevation: 3 },
-  default: { boxShadow: '0 6px 18px rgba(42,26,107,0.08)' },
-});
+
 
 const newSessionShadow = Platform.select({
   ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.28, shadowRadius: 20 },
