@@ -6,11 +6,25 @@
 // react-native-agora's RtcEngineEventHandler surface has shifted
 // slightly across 4.x minor releases (checked against 4.2–4.3 docs
 // at the time this was written).
-import {
-  createAgoraRtcEngine,
-  ChannelProfileType,
-  ClientRoleType,
-} from 'react-native-agora';
+// react-native-agora is required lazily, inside join() below, instead of
+// imported at the top of this file. Its compiled entry point
+// (specs/NativeAgoraRtcNg.js) calls TurboModuleRegistry.getEnforcing()
+// at MODULE SCOPE — which throws immediately, the instant the module is
+// required, if the native AgoraRtcNg module isn't registered (a real gap
+// in this library: the New Architecture path has no graceful fallback,
+// unlike its NativeModules.X fallback for the old architecture, which is
+// wrapped in a Proxy that only throws when actually used).
+//
+// Since App.js imports every screen eagerly for React Navigation —
+// including SessionMain/AttendeeSession, which import this file — a
+// static top-level import here meant that failure could crash the
+// ENTIRE APP the instant the JS bundle loaded, before Splash even
+// rendered, with nothing recoverable and nothing useful logged anywhere
+// visible. Deferring the require() to inside join() means that failure
+// (if it happens) now only surfaces when someone actually tries to
+// start/join a session — recoverable, attributable to this screen, and
+// (combined with the root-level ErrorBoundary in App.js) shown as a
+// readable error instead of the app silently closing.
 import { PermissionsAndroid, Platform } from 'react-native';
 
 // CAMERA/RECORD_AUDIO are "dangerous" permissions on Android — declaring
@@ -51,6 +65,11 @@ export function createAgoraSession(handlers = {}) {
       if (!hasPermissions) {
         throw new Error('Camera and microphone permissions are required to join a session.');
       }
+
+      // See the comment above the (now-removed) top-level import — this
+      // is where react-native-agora actually gets loaded, deferred until
+      // someone is actually joining a session rather than at app launch.
+      const { createAgoraRtcEngine, ChannelProfileType, ClientRoleType } = require('react-native-agora');
 
       engine = createAgoraRtcEngine();
       engine.initialize({

@@ -3,7 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { supabase } from './src/lib/supabase';
 import OfflineGate from './src/components/OfflineGate'; // adjust path if this lives elsewhere
-import { withErrorBoundary } from './src/components/ErrorBoundary'; // adjust path if this lives elsewhere
+import ErrorBoundary, { withErrorBoundary } from './src/components/ErrorBoundary'; // adjust path if this lives elsewhere
 
 import SplashScreen from './src/screens/auth/SplashScreen';
 import SignUpScreen from './src/screens/auth/SignUpScreen';
@@ -89,12 +89,24 @@ export default function App() {
   }, []);
 
   return (
-    <OfflineGate>
-      <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
-          initialRouteName="Splash"
-        >
+    // Root-level boundary — previously nothing wrapped OfflineGate/the
+    // navigator at all, so any failure during initial mount (a native
+    // module that didn't link correctly, an error in the first screen's
+    // effects, anything) had no boundary to catch it and crashed the
+    // entire app with nothing shown and nothing logged anywhere visible.
+    // withErrorBoundary (used below on individual screens like
+    // ChatPanel) intentionally stays scoped to mid-session panels; this
+    // is the one place a boundary belongs at the true root.
+    <ErrorBoundary
+      title="Kesher couldn't start"
+      subtitle="Something went wrong on launch. Force-closing and reopening the app usually fixes this — if it keeps happening, it's worth reporting."
+    >
+      <OfflineGate>
+        <NavigationContainer>
+          <Stack.Navigator
+            screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+            initialRouteName="Splash"
+          >
           <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="SignUp" component={SignUpScreen} />
@@ -143,6 +155,7 @@ export default function App() {
           <Stack.Screen name="ChannelRoles" component={ChannelRolesScreen} options={PANEL_ANIMATION} />
         </Stack.Navigator>
       </NavigationContainer>
-    </OfflineGate>
+      </OfflineGate>
+    </ErrorBoundary>
   );
 }

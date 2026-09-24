@@ -38,13 +38,24 @@ export default class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      // title/subtitle are optional so the root-level usage (App.js,
+      // wrapping OfflineGate/the whole navigator) can show copy that
+      // makes sense for a startup crash, instead of the mid-session
+      // default below. The "Go back" button only renders when a
+      // navigation prop was actually passed — at the root there's no
+      // previous screen to go back to, so showing it there would just
+      // be a dead button.
+      const title = this.props.title || 'Something went wrong on this screen';
+      const subtitle = this.props.subtitle || 'The rest of your session is unaffected — go back and try again.';
       return (
         <View style={styles.container}>
-          <Text style={styles.title}>Something went wrong on this screen</Text>
-          <Text style={styles.subtitle}>The rest of your session is unaffected — go back and try again.</Text>
-          <TouchableOpacity style={styles.btn} onPress={() => this.props.navigation?.goBack?.()}>
-            <Text style={styles.btnText}>Go back</Text>
-          </TouchableOpacity>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.subtitle}>{subtitle}</Text>
+          {this.props.navigation && (
+            <TouchableOpacity style={styles.btn} onPress={() => this.props.navigation?.goBack?.()}>
+              <Text style={styles.btnText}>Go back</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
