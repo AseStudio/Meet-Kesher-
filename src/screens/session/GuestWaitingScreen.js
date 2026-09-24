@@ -100,7 +100,7 @@ export default function GuestWaitingScreen({ navigation, route }) {
   };
 
   if (entering) {
-    return <EnteringSessionTransition message="Entering session" />;
+    return <EnteringSessionTransition message="Entering session" color={modeColor} />;
   }
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });

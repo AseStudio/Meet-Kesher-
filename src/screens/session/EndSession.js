@@ -11,6 +11,13 @@ import { ModeIcon, getModeColor, getModeSoft } from '../../lib/iconMeta';
 export default function EndSession({ navigation, route }) {
   const session = route.params?.session;
   const recordingPath = route.params?.recordingPath;
+  // Same fix as LobbyScreen/SessionEndedGuestScreen: this screen hard-
+  // coded palette.primary (fixed purple) for its icon gradient and
+  // action buttons regardless of the session's mode, so the theming a
+  // host sees in the lobby and live session reverted to purple the
+  // moment the session ended. Drive it off the shared mode table.
+  const modeColor = getModeColor(session?.mode);
+  const modeSoft = getModeSoft(session?.mode);
   const [attendees, setAttendees] = useState([]);
   const [duration, setDuration] = useState('');
   const [loading, setLoading] = useState(true);
@@ -94,7 +101,7 @@ export default function EndSession({ navigation, route }) {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={palette.primary} />
+        <ActivityIndicator size="large" color={modeColor} />
         <Text style={styles.loadingText}>Loading summary...</Text>
       </View>
     );
@@ -113,7 +120,7 @@ export default function EndSession({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.scroll}>
 
         <LinearGradient
-          colors={[palette.primaryBright, palette.primary, palette.primaryDeep]}
+          colors={[modeColor, modeColor]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.iconWrap}
@@ -152,7 +159,7 @@ export default function EndSession({ navigation, route }) {
             <View style={styles.avatarRow}>
               {attendees.map((a, i) => (
                 <View key={i} style={styles.avatarWrap}>
-                  <View style={styles.avatar}>
+                  <View style={[styles.avatar, { backgroundColor: modeColor }]}>
                     <Text style={styles.avatarText}>
                       {getInitials(a.profiles?.full_name)}
                     </Text>
@@ -187,7 +194,7 @@ export default function EndSession({ navigation, route }) {
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={styles.primaryBtn}
+            style={[styles.primaryBtn, { backgroundColor: modeColor }]}
             onPress={() => navigation.navigate('SubmissionsInbox')}
             activeOpacity={0.85}
           >
@@ -195,12 +202,12 @@ export default function EndSession({ navigation, route }) {
             <Text style={styles.primaryBtnText}>View Submissions</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.secondaryBtn}
+            style={[styles.secondaryBtn, { borderColor: modeColor }]}
             onPress={() => navigation.navigate('CreateSession')}
             activeOpacity={0.85}
           >
-            <Ionicons name="add-circle-outline" size={17} color={palette.primary} />
-            <Text style={styles.secondaryBtnText}>Start New Session</Text>
+            <Ionicons name="add-circle-outline" size={17} color={modeColor} />
+            <Text style={[styles.secondaryBtnText, { color: modeColor }]}>Start New Session</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.homeBtn}

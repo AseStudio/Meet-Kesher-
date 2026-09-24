@@ -40,6 +40,16 @@ export default function SessionMain({ navigation, route }) {
   // (most permissive) capabilities if session/mode isn't loaded yet,
   // same default getModeColor already uses elsewhere on this screen.
   const capabilities = getSessionModeCapabilities(session?.mode);
+  // Which pool (host's own hosting minutes vs a purchased participant-
+  // minutes balance) this session is actually billing against. Starts
+  // from sessions.minute_source (set once at creation in
+  // CreateSession.js) but needs to be its own piece of state, not just
+  // read off `session` directly — see the low-minutes modal below,
+  // which lets the host switch pools mid-session, and `session` itself
+  // is a static route-param snapshot that never updates on its own.
+  const [minuteSource, setMinuteSource] = useState(session?.minute_source === 'participant' ? 'participant' : 'host');
+  const minuteSourceRef = useRef(minuteSource);
+  useEffect(() => { minuteSourceRef.current = minuteSource; }, [minuteSource]);
   const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
   const insets = useSafeAreaInsets();
   const styles = useSessionMainStyles(scale, isSmall, width, height, insets);
@@ -286,6 +296,56 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const pendingHostMinutesRef = useRef(0);
   const hostMinuteTickIntervalRef = useRef(null);
   const HOST_MINUTE_TICK_MS = 60000;
+
+  // Low-minutes modal — shown the moment whichever pool this session is
+  // actually billing against (minuteSource) hits zero. Gives the host a
+  // real choice (switch to the other pool, or end now) instead of
+  // TimerScreen's old behavior of just ending the session outright the
+  // instant a balance ran out with no way to keep going on the other
+  // pool. lowMinutesModal is null when hidden, or { otherSource,
+  // otherBalance } describing the pool the host could switch to.
+  const [lowMinutesModal, setLowMinutesModal] = useState(null);
+  const lowMinutesModalRef = useRef(null);
+  useEffect(() => { lowMinutesModalRef.current = lowMinutesModal; }, [lowMinutesModal]);
+  const [lowMinutesCountdown, setLowMinutesCountdown] = useState(10);
+  const switchingPoolRef = useRef(false);
+
+  // Best-effort check, run right after every billing tick — fetches
+  // both balances fresh (same sources TimerScreen.js reads: get_my_usage
+  // for hosting minutes, profiles.participant_minutes_balance for
+  // participant minutes) and opens the modal if the ACTIVE pool is now
+  // at zero. Reads both regardless of which is active so the modal can
+  // immediately show whether switching would even help (otherBalance).
+  const checkForExhaustedMinutes = async () => {
+    if (lowMinutesModalRef.current) return; // already showing, don't re-trigger
+    try {
+      const [{ data: usageRow }, { data: { user } }] = await Promise.all([
+        supabase.rpc('get_my_usage'),
+        supabase.auth.getUser(),
+      ]);
+      if (!user) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('participant_minutes_balance')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const hostBalance = Math.max(0, usageRow?.host_minutes_balance ?? 0);
+      const participantBalance = Math.max(0, profile?.participant_minutes_balance ?? 0);
+      const activeBalance = minuteSourceRef.current === 'participant' ? participantBalance : hostBalance;
+      if (activeBalance > 0) return;
+
+      const otherSource = minuteSourceRef.current === 'participant' ? 'host' : 'participant';
+      const otherBalance = otherSource === 'participant' ? participantBalance : hostBalance;
+      setLowMinutesCountdown(10);
+      setLowMinutesModal({ otherSource, otherBalance });
+    } catch (e) {
+      // Best-effort, same as the billing tick itself — a failed check
+      // just means the modal doesn't show for this tick; it'll be
+      // re-checked on the next one.
+    }
+  };
+
   useEffect(() => {
     lastHostTickRef.current = Date.now();
     const tick = setInterval(async () => {
@@ -297,21 +357,77 @@ function getProfileKey(uplink = 0, downlink = 0) {
       if (wholeMinutes > 0) {
         pendingHostMinutesRef.current -= wholeMinutes;
         try {
-          // Which pool this session actually bills against was chosen
-          // once at creation (CreateSession.js) and stored on
-          // sessions.minute_source — everything else here (the ticking,
-          // the sub-minute remainder tracking) is identical either way.
-          const rpcName = session?.minute_source === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
+          // Which pool this session actually bills against — starts
+          // from sessions.minute_source (CreateSession.js) but can
+          // change mid-session via the low-minutes modal's "switch
+          // pool" action, hence minuteSource state instead of reading
+          // session?.minute_source directly.
+          const rpcName = minuteSource === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
           await supabase.rpc(rpcName, { p_minutes: wholeMinutes });
         } catch (e) {
           // Best-effort — if one tick's deduction fails, that minute
           // just goes unbilled; not worth interrupting the session over.
         }
+        // Whether or not the deduction above succeeded, check current
+        // balances — if the pool we just billed against is now at
+        // zero, this is what surfaces the low-minutes modal instead of
+        // silently letting the next tick bill an already-exhausted
+        // balance.
+        checkForExhaustedMinutes();
       }
     }, HOST_MINUTE_TICK_MS);
     hostMinuteTickIntervalRef.current = tick;
     return () => clearInterval(tick);
-  }, [session?.minute_source]);
+  }, [minuteSource]);
+
+  // Drives the modal's visible countdown. Starts fresh at 10 whenever
+  // the modal opens (see checkForExhaustedMinutes) and, if the host
+  // hasn't chosen an action by the time it hits zero, ends the session
+  // automatically — the safe default, since continuing to run without
+  // an explicit "switch pools" choice would mean silently drawing down
+  // a balance the host never agreed to spend.
+  useEffect(() => {
+    if (!lowMinutesModal) return;
+    const iv = setInterval(() => {
+      setLowMinutesCountdown((c) => {
+        if (c <= 1) {
+          clearInterval(iv);
+          setLowMinutesModal(null);
+          endSession(true);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [lowMinutesModal]);
+
+  // "Switch to the other pool" — updates sessions.minute_source (so a
+  // reload/rejoin picks up the new source too) and resets the tick
+  // effect's accrual so the new pool starts billing cleanly from this
+  // moment, instead of inheriting a partial minute accrued against the
+  // pool that just ran out.
+  const switchMinutePool = async () => {
+    if (!lowMinutesModal || switchingPoolRef.current) return;
+    switchingPoolRef.current = true;
+    const newSource = lowMinutesModal.otherSource;
+    try {
+      await supabase.from('sessions').update({ minute_source: newSource }).eq('id', session?.id);
+      setMinuteSource(newSource);
+      pendingHostMinutesRef.current = 0;
+      lastHostTickRef.current = Date.now();
+      setLowMinutesModal(null);
+    } catch (e) {
+      showAlert('Could not switch', e.message || 'Please try again.');
+    } finally {
+      switchingPoolRef.current = false;
+    }
+  };
+
+  const endSessionFromLowMinutesModal = () => {
+    setLowMinutesModal(null);
+    endSession(true);
+  };
 
   // Guest minute-penalty tracking. Guests have no stable identity to
   // track individually (no account, no user_id) — so instead of trying
@@ -1196,7 +1312,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
     }
   };
 
-  const endSession = () => {
+  const endSession = (skipConfirm = false) => {
     // Status update goes FIRST and is checked. This exact function has
     // regressed back to the "leaveAgora first, unguarded, no check" shape
     // twice now in different uploads — reordering so the actual state
@@ -1287,7 +1403,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
       const finalMinutes = Math.ceil(finalPending);
       if (finalMinutes > 0) {
         try {
-          const rpcName = session?.minute_source === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
+          const rpcName = minuteSourceRef.current === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
           await supabase.rpc(rpcName, { p_minutes: finalMinutes });
         } catch (e) {}
       }
@@ -1300,6 +1416,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
     // the confirm UI never appears, so the destructive action (which only
     // ran from inside that button's onPress) silently never fired. Use the
     // browser's own confirm() on web instead; native keeps Alert.alert.
+    //
+    // skipConfirm bypasses this entirely — used by the low-minutes modal
+    // (both its "End Session Now" button and its 10s auto-timeout), where
+    // the host has either just explicitly chosen to end, or isn't present
+    // to answer a second confirmation at all, so asking again would either
+    // be redundant or silently swallow the automatic timeout.
+    if (skipConfirm) {
+      proceed();
+      return;
+    }
     if (Platform.OS === 'web') {
       if (window.confirm('End session for everyone?')) proceed();
     } else {
@@ -1403,7 +1529,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
     // trade-off for "free users never even see it" over a flash of an
     // enabled-then-disabled button while the check is in flight.
     ...(canRecord ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
-    { icon: 'power-outline', label: 'End', action: endSession, end: true },
+    // Explicit no-arg wrapper, not `action: endSession` directly — this
+    // button is wired up as `onPress={tool.action}`, and onPress hands
+    // its synthetic event through as the first argument. endSession's
+    // new `skipConfirm` param would otherwise receive that (truthy)
+    // event object and silently skip the "End session for everyone?"
+    // confirmation on every normal tap of this button.
+    { icon: 'power-outline', label: 'End', action: () => endSession(), end: true },
   ];
 
   // Button size shrinks to whatever fits ALL tools on one row with no
@@ -1852,6 +1984,44 @@ function getProfileKey(uplink = 0, downlink = 0) {
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Low Minutes Modal — shown the instant the active billing pool
+          hits zero (see checkForExhaustedMinutes). Not dismissible by
+          tapping outside; the host must pick an action, or the 10s
+          countdown ends the session for them. */}
+      <Modal visible={!!lowMinutesModal} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.lowMinutesCard}>
+            <View style={styles.lowMinutesIconWrap}>
+              <Ionicons name="hourglass-outline" size={28} color={colors.red} />
+            </View>
+            <Text style={styles.lowMinutesTitle}>
+              {minuteSource === 'participant' ? 'Participant minutes' : 'Hosting minutes'} exhausted
+            </Text>
+            <Text style={styles.lowMinutesSubtitle}>
+              {lowMinutesModal?.otherBalance > 0
+                ? `Switch to your ${lowMinutesModal?.otherSource === 'participant' ? 'participant' : 'hosting'} minutes (${lowMinutesModal?.otherBalance} left) to keep going, or end the session now.`
+                : 'You\u2019re out of minutes on both pools — this session is about to end.'}
+            </Text>
+            <View style={styles.lowMinutesCountdownWrap}>
+              <Text style={styles.lowMinutesCountdownText}>Ending automatically in {lowMinutesCountdown}s</Text>
+            </View>
+            <View style={styles.lowMinutesActions}>
+              {lowMinutesModal?.otherBalance > 0 && (
+                <TouchableOpacity style={styles.lowMinutesSwitchBtn} onPress={switchMinutePool} activeOpacity={0.85}>
+                  <Ionicons name="swap-horizontal-outline" size={17} color={colors.white} />
+                  <Text style={styles.lowMinutesSwitchBtnText}>
+                    Switch to {lowMinutesModal?.otherSource === 'participant' ? 'Participant' : 'Hosting'} Minutes
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.lowMinutesEndBtn} onPress={endSessionFromLowMinutesModal} activeOpacity={0.85}>
+                <Text style={styles.lowMinutesEndBtnText}>End Session Now</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* Attendee Dropdown Modal */}
@@ -2356,6 +2526,39 @@ function useSessionMainStyles(scale, isSmall, width, height, insets) {
     fontWeight: '700', 
     fontSize: scale(13) 
   },
+  lowMinutesCard: {
+    backgroundColor: '#1E1E3F',
+    borderRadius: scale(18),
+    padding: scale(22),
+    width: isSmall ? Math.min(scale(300), width * 0.9) : scale(340),
+    maxWidth: '92%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,59,0.35)',
+  },
+  lowMinutesIconWrap: {
+    width: scale(56), height: scale(56), borderRadius: scale(28),
+    backgroundColor: 'rgba(255,59,59,0.15)', alignItems: 'center', justifyContent: 'center',
+    marginBottom: scale(14),
+  },
+  lowMinutesTitle: { color: colors.white, fontSize: scale(16), fontWeight: '800', textAlign: 'center', marginBottom: scale(8) },
+  lowMinutesSubtitle: { color: 'rgba(255,255,255,0.75)', fontSize: scale(12.5), textAlign: 'center', lineHeight: scale(18), marginBottom: scale(14) },
+  lowMinutesCountdownWrap: {
+    backgroundColor: 'rgba(255,59,59,0.15)', borderRadius: scale(20),
+    paddingVertical: scale(6), paddingHorizontal: scale(14), marginBottom: scale(18),
+  },
+  lowMinutesCountdownText: { color: colors.red, fontSize: scale(12), fontWeight: '700' },
+  lowMinutesActions: { width: '100%', gap: scale(10) },
+  lowMinutesSwitchBtn: {
+    flexDirection: 'row', gap: scale(8), backgroundColor: colors.primary,
+    paddingVertical: scale(13), borderRadius: scale(12), alignItems: 'center', justifyContent: 'center',
+  },
+  lowMinutesSwitchBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(13) },
+  lowMinutesEndBtn: {
+    paddingVertical: scale(13), borderRadius: scale(12), alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  lowMinutesEndBtnText: { color: colors.white, fontWeight: '700', fontSize: scale(13) },
   dropdownModal: { 
     backgroundColor: '#1E1E3F', 
     borderRadius: scale(14), 

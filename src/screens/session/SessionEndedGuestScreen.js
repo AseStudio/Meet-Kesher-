@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { palette, cardShadow } from '../../theme/palette';
+import { getModeColor, getModeSoft } from '../../lib/iconMeta';
 
 // Where a guest (no account, no dashboard to go "back" to) lands once
 // they're no longer in a live session — the session ended, the host
@@ -39,11 +40,18 @@ export default function SessionEndedGuestScreen({ navigation, route }) {
   const session = route.params?.session;
   const reason = route.params?.reason || 'ended';
   const { icon, title, subtitle } = COPY[reason] || COPY.ended;
+  // Same fix as LobbyScreen/EndSession: this was hard-coded to
+  // palette.primary (fixed purple) instead of the session's mode
+  // color, so the theming from the lobby dropped the moment a guest
+  // landed here on session end/cancel/kick/leave. Drive it off the
+  // session's mode like everywhere else in the live-session flow.
+  const modeColor = getModeColor(session?.mode);
+  const modeSoft = getModeSoft(session?.mode);
 
   return (
     <View style={styles.container}>
-      <View style={styles.iconWrap}>
-        <Ionicons name={icon} size={48} color={palette.primary} />
+      <View style={[styles.iconWrap, { backgroundColor: modeSoft }]}>
+        <Ionicons name={icon} size={48} color={modeColor} />
       </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.subtitle}>{subtitle}</Text>
@@ -55,11 +63,11 @@ export default function SessionEndedGuestScreen({ navigation, route }) {
       )}
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('SignUp')} activeOpacity={0.85}>
+        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: modeColor }]} onPress={() => navigation.navigate('SignUp')} activeOpacity={0.85}>
           <Text style={styles.primaryBtnText}>Create Account</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('GuestJoin')} activeOpacity={0.85}>
-          <Text style={styles.secondaryBtnText}>Join a Session as Guest</Text>
+        <TouchableOpacity style={[styles.secondaryBtn, { borderColor: modeColor }]} onPress={() => navigation.navigate('GuestJoin')} activeOpacity={0.85}>
+          <Text style={[styles.secondaryBtnText, { color: modeColor }]}>Join a Session as Guest</Text>
         </TouchableOpacity>
       </View>
 

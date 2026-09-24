@@ -3,7 +3,7 @@ import { View, Text, Animated, StyleSheet, Easing } from 'react-native';
 import LogoMark from './LogoMark';
 import { colors } from '../theme/colors';
 
-export default function EnteringSessionTransition({ message = 'Entering session' }) {
+export default function EnteringSessionTransition({ message = 'Entering session', color = colors.primary }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
@@ -49,7 +49,7 @@ export default function EnteringSessionTransition({ message = 'Entering session'
   });
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: color }]}>
       <View style={styles.circleTopLeft} />
       <View style={styles.circleBottomRight} />
 

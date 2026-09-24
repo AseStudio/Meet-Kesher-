@@ -460,7 +460,7 @@ export default function LobbyScreen({ navigation, route }) {
   // Holding on the entering-session transition — takes priority over
   // everything else below since it's the most time-sensitive state.
   if (entering) {
-    return <EnteringSessionTransition />;
+    return <EnteringSessionTransition color={modeColor} />;
   }
 
   // Host cancelled — terminal state
