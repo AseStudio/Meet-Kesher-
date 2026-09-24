@@ -9,7 +9,7 @@ import { palette, cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 
-export default function ChannelsTab({ navigation, isHost, isVerified }) {
+export default function ChannelsTab({ navigation }) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState([]);
@@ -127,15 +127,6 @@ export default function ChannelsTab({ navigation, isHost, isVerified }) {
           returnKeyType="search"
         />
       </View>
-
-      {isHost && !isVerified && (
-        <View style={styles.verifyNotice}>
-          <Ionicons name="information-circle-outline" size={16} color={palette.inkMuted} />
-          <Text style={styles.verifyNoticeText}>
-            Creating a channel needs 100+ session joins in the last 30 days. Keep hosting — this unlocks automatically.
-          </Text>
-        </View>
-      )}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={palette.primary} />

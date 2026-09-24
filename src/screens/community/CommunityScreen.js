@@ -13,7 +13,7 @@ import FeedTab from './FeedTab';
  * shared by both roles rather than forked, since the only thing that
  * differs is which "Home" route the nav bar's Home button should
  * return to and whether the "+ New channel" action is available
- * (verified hosts only). Everything else — browsing, joining,
+ * (hosts only). Everything else — browsing, joining,
  * reacting — is identical for both roles.
  *
  * ⚠️ Needs a "Community" route registered in your navigator alongside
@@ -100,7 +100,7 @@ export default function CommunityScreen({ navigation, route }) {
               </View>
             )}
           </TouchableOpacity>
-          {tab === 'channels' && isHost && verified && (
+          {tab === 'channels' && isHost && (
             <TouchableOpacity
               style={styles.newChannelBtn}
               onPress={() => navigation.navigate('CreateChannel')}
@@ -142,7 +142,7 @@ export default function CommunityScreen({ navigation, route }) {
 
       <View style={styles.body}>
         <View style={{ flex: 1, display: tab === 'channels' ? 'flex' : 'none' }}>
-          <ChannelsTab navigation={navigation} isHost={isHost} isVerified={verified} />
+          <ChannelsTab navigation={navigation} />
         </View>
         {feedEverOpened && (
           <View style={{ flex: 1, display: tab === 'feed' ? 'flex' : 'none' }}>
