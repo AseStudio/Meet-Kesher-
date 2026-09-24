@@ -13,6 +13,7 @@ import WhiteboardCanvas from '../../components/WhiteboardCanvas'; // adjust path
 import GraphBoardCanvas from '../../components/GraphboardCanvas';
 import NotificationToastStack from '../../components/NotificationToast';
 import { ModeIcon, SIGNAL_ICON, BOARD_TYPE_ICON, getModeColor } from '../../lib/iconMeta';
+import { getSessionModeCapabilities } from '../../lib/sessionModes';
 import { useResponsive } from '../../lib/responsive';
 import { useSessionExitGuard } from '../../lib/useSessionExitGuard';
 import { showAlert } from '../../lib/alert';
@@ -34,6 +35,11 @@ const TOOLBAR_H_PADDING = 20; // total horizontal inset the bar reserves
 
 export default function SessionMain({ navigation, route }) {
   const session = route.params?.session;
+  // Drives which toolbar buttons and board types this session mode
+  // allows — see lib/sessionModes.js. Falls back to classroom's
+  // (most permissive) capabilities if session/mode isn't loaded yet,
+  // same default getModeColor already uses elsewhere on this screen.
+  const capabilities = getSessionModeCapabilities(session?.mode);
   const { scale, isTablet, isDesktop, isSmall, width, height } = useResponsive();
   const insets = useSafeAreaInsets();
   const styles = useSessionMainStyles(scale, isSmall, width, height, insets);
@@ -229,6 +235,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // gets set without this file ever touching PollScreen's own realtime
   // topic (session-poll-${id}).
   const [pollNotice, setPollNotice] = useState(false);
+  // Live count of people in session_waitlist for the toolbar badge —
+  // same badge pattern as unreadCount/pollNotice above. Waitlist entries
+  // only exist once the session is at capacity (see enforce_interview_capacity
+  // / the classroom+meeting waitlist trigger), so this is usually 0.
+  const [waitlistCount, setWaitlistCount] = useState(0);
 
   // Refs
   const agoraSessionRef = useRef(null);
@@ -286,7 +297,12 @@ function getProfileKey(uplink = 0, downlink = 0) {
       if (wholeMinutes > 0) {
         pendingHostMinutesRef.current -= wholeMinutes;
         try {
-          await supabase.rpc('consume_host_minutes', { p_minutes: wholeMinutes });
+          // Which pool this session actually bills against was chosen
+          // once at creation (CreateSession.js) and stored on
+          // sessions.minute_source — everything else here (the ticking,
+          // the sub-minute remainder tracking) is identical either way.
+          const rpcName = session?.minute_source === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
+          await supabase.rpc(rpcName, { p_minutes: wholeMinutes });
         } catch (e) {
           // Best-effort — if one tick's deduction fails, that minute
           // just goes unbilled; not worth interrupting the session over.
@@ -295,7 +311,7 @@ function getProfileKey(uplink = 0, downlink = 0) {
     }, HOST_MINUTE_TICK_MS);
     hostMinuteTickIntervalRef.current = tick;
     return () => clearInterval(tick);
-  }, []);
+  }, [session?.minute_source]);
 
   // Guest minute-penalty tracking. Guests have no stable identity to
   // track individually (no account, no user_id) — so instead of trying
@@ -427,6 +443,34 @@ function getProfileKey(uplink = 0, downlink = 0) {
       })
       .subscribe();
     return () => supabase.removeChannel(ch);
+  }, [session?.id]);
+
+  // Keeps the toolbar's Waitlist badge current — loads the initial
+  // count, then adjusts it in place on every insert/delete rather than
+  // refetching (waitlist rows are only ever added when someone joins a
+  // full session and removed when they leave or get let in — see
+  // WaitlistScreen.js, which owns the actual list).
+  useEffect(() => {
+    if (!session?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { count } = await supabase
+        .from('session_waitlist')
+        .select('id', { count: 'exact', head: true })
+        .eq('session_id', session.id);
+      if (!cancelled) setWaitlistCount(count || 0);
+    })();
+    const ch = supabase
+      .channel(`session-waitlist-watch-${session.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'session_waitlist',
+        filter: `session_id=eq.${session.id}`,
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') setWaitlistCount((c) => c + 1);
+        else if (payload.eventType === 'DELETE') setWaitlistCount((c) => Math.max(0, c - 1));
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(ch); };
   }, [session?.id]);
 
   const pushToast = (text) => {
@@ -1067,6 +1111,16 @@ function getProfileKey(uplink = 0, downlink = 0) {
   // Toggling recording off, whether from the Record button or the
   // browser's own native "Stop sharing" bar — both end up here, since
   // both should behave identically from the app's point of view.
+  //
+  // Recording minutes are billed HERE, not in endSession() — this used
+  // to only bill at end-of-session, which meant a host who tapped
+  // Record → tapped it again to stop (the normal case; most hosts don't
+  // record right up until the session ends) never got billed at all,
+  // since endSession's recording branch only ran when `recording` was
+  // still true. Billing on every actual stop, regardless of how the
+  // session eventually ends, is what "the recording was made either
+  // way, so the cost is incurred either way" (see endSession) actually
+  // requires.
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -1074,6 +1128,13 @@ function getProfileKey(uplink = 0, downlink = 0) {
     recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
     recordingStreamRef.current = null;
     setRecording(false);
+    if (recordingStartedAtRef.current) {
+      const recordedMinutes = Math.max(1, Math.ceil((Date.now() - recordingStartedAtRef.current) / 60000));
+      recordingStartedAtRef.current = null;
+      // Best-effort, fire-and-forget — same as every other minute-billing
+      // call in this file; shouldn't block stopping the recording.
+      supabase.rpc('consume_recording_minutes', { p_minutes: recordedMinutes }).catch(() => {});
+    }
   };
 
   const toggleRecording = async () => {
@@ -1173,19 +1234,11 @@ function getProfileKey(uplink = 0, downlink = 0) {
             if (!uploadError) {
               recordingPath = path;
               await supabase.from('sessions').update({ recording_path: path }).eq('id', session.id);
-
-              // Deduct recording minutes now, at upload time — not when
-              // the host later downloads or dismisses it on the summary
-              // screen. The recording was made either way, so the cost
-              // is incurred either way; same reasoning as consume_host_minutes
-              // below being billed off actual elapsed time, not off some
-              // later, unrelated user action.
-              if (recordingStartedAtRef.current) {
-                const recordedMinutes = Math.max(1, Math.ceil((Date.now() - recordingStartedAtRef.current) / 60000));
-                try {
-                  await supabase.rpc('consume_recording_minutes', { p_minutes: recordedMinutes });
-                } catch (e) {}
-              }
+              // Recording minutes are billed inside stopRecording() itself
+              // now, the moment recording actually stops — see that
+              // function's comment. stopRecording() was already called
+              // just above (before this upload), so billing has happened
+              // by the time we get here.
             } else {
               // Logged, not surfaced to the host — see comment above on
               // why this stays best-effort. But silent-and-invisible is
@@ -1234,7 +1287,8 @@ function getProfileKey(uplink = 0, downlink = 0) {
       const finalMinutes = Math.ceil(finalPending);
       if (finalMinutes > 0) {
         try {
-          await supabase.rpc('consume_host_minutes', { p_minutes: finalMinutes });
+          const rpcName = session?.minute_source === 'participant' ? 'consume_participant_minutes' : 'consume_host_minutes';
+          await supabase.rpc(rpcName, { p_minutes: finalMinutes });
         } catch (e) {}
       }
 
@@ -1334,13 +1388,14 @@ function getProfileKey(uplink = 0, downlink = 0) {
     // AgoraService.native.js), so rather than show a button that always
     // silently no-ops there, it just doesn't exist on that platform.
     ...(Platform.OS === 'web' ? [{ icon: screenSharing ? 'stop-circle-outline' : 'desktop-outline', label: 'Share', action: toggleScreenShare, active: screenSharing }] : []),
-    { icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) },
-    { icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode },
-    { icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 },
+    ...(capabilities.agenda ? [{ icon: 'clipboard-outline', label: 'Agenda', action: () => navigation.navigate('AgendaPanel', { session }) }] : []),
+    ...(capabilities.board ? [{ icon: 'create-outline', label: 'Board', action: () => boardMode ? closeBoard() : setShowBoardPicker(true), active: !!boardMode }] : []),
+    ...(capabilities.poll ? [{ icon: 'bar-chart-outline', label: 'Poll', action: openPoll, badge: pollNotice ? 1 : 0 }] : []),
     { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen', { session }) },
-    { icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount },
-    { icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) },
+    ...(capabilities.chat ? [{ icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount }] : []),
+    ...(capabilities.reactions ? [{ icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) }] : []),
     { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
+    { icon: 'people-outline', label: 'Waitlist', action: () => navigation.navigate('Waitlist', { session }), badge: waitlistCount },
     // Free hosts never see this at all — not shown-then-blocked, just
     // absent. canRecord starts false until the plan fetch resolves, so
     // this also means the button briefly doesn't exist for an eligible
@@ -1709,18 +1764,24 @@ function getProfileKey(uplink = 0, downlink = 0) {
                 ? `Choose a Board to Call ${getAttendeeName(boardPickerTargetUid)} To`
                 : 'Choose a Board'}
             </Text>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.whiteboard} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Whiteboard</Text><Text style={styles.boardPickerDesc}>Clean white canvas with color pens</Text></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('blackboard')}>
-              <Ionicons name={BOARD_TYPE_ICON.blackboard} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Blackboard</Text><Text style={styles.boardPickerDesc}>Classic chalkboard with chalk colors</Text></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('graph')}>
-              <Ionicons name={BOARD_TYPE_ICON.graph} size={26} color={colors.white} />
-              <View><Text style={styles.boardPickerName}>Graph Board</Text><Text style={styles.boardPickerDesc}>Plot equations, XY values and charts</Text></View>
-            </TouchableOpacity>
+            {capabilities.boardTypes.includes('whiteboard') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('whiteboard')}>
+                <Ionicons name={BOARD_TYPE_ICON.whiteboard} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Whiteboard</Text><Text style={styles.boardPickerDesc}>Clean white canvas with color pens</Text></View>
+              </TouchableOpacity>
+            )}
+            {capabilities.boardTypes.includes('blackboard') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('blackboard')}>
+                <Ionicons name={BOARD_TYPE_ICON.blackboard} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Blackboard</Text><Text style={styles.boardPickerDesc}>Classic chalkboard with chalk colors</Text></View>
+              </TouchableOpacity>
+            )}
+            {capabilities.boardTypes.includes('graph') && (
+              <TouchableOpacity style={styles.boardPickerOption} onPress={() => handleBoardPickerSelect('graph')}>
+                <Ionicons name={BOARD_TYPE_ICON.graph} size={26} color={colors.white} />
+                <View><Text style={styles.boardPickerName}>Graph Board</Text><Text style={styles.boardPickerDesc}>Plot equations, XY values and charts</Text></View>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>

@@ -6,7 +6,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
-import { palette, softShadow as cardShadow } from '../../theme/palette';
 import { supabase } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
 import { getPlan, getPlanMaxAttendees } from '../../lib/constants';
@@ -15,7 +14,25 @@ import { getPlan, getPlanMaxAttendees } from '../../lib/constants';
 // PALETTE — same tokens/mapping as HostDashboard.js / AttendeeDashboard.js
 // so this screen reads as part of the same product, not a one-off.
 // ─────────────────────────────────────────────────────────────────────
-
+const palette = {
+  primary: colors.primary,
+  primaryBright: colors.primaryLight,
+  primaryDeep: colors.primaryDark,
+  primarySoft: colors.background,
+  ink: colors.text,
+  inkMuted: colors.textLight,
+  surface: colors.white,
+  canvas: colors.background,
+  line: colors.greyLight,
+  success: colors.green,
+  successSoft: '#E7FBF0',
+  danger: colors.red,
+  dangerSoft: '#FFE9E9',
+  amber: colors.yellow,
+  amberSoft: '#FFF3DE',
+  neutralSoft: colors.greyLight,
+  neutralText: colors.grey,
+};
 
 const modes = [
   { id: 'classroom', label: 'Classroom', icon: 'school-outline', set: 'ion', color: palette.primary, soft: palette.primarySoft, desc: 'Lectures, presentations & assignments.' },
@@ -63,16 +80,23 @@ export default function CreateSession({ navigation }) {
   const [sessionCode] = useState(generateCode());
   const [plan, setPlan] = useState('free');
   const [hostMinutes, setHostMinutes] = useState(null);
+  const [participantMinutes, setParticipantMinutes] = useState(null);
+  const [minuteSource, setMinuteSource] = useState('host');
   const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: profile } = await supabase.from('profiles').select('plan, is_premium').eq('id', user.id).maybeSingle();
+      const { data: profile } = await supabase.from('profiles').select('plan').eq('id', user.id).maybeSingle();
       const nextPlan = profile?.plan || 'free';
       setPlan(nextPlan);
-      setIsPremium(!!profile?.is_premium);
+      // is_premium is a DB column nothing ever writes after checkout —
+      // the Paystack webhook only updates profiles.plan — so it's always
+      // false/null. Deriving "premium" from plan itself, the same way
+      // CommunityScreen already does, is what actually reflects a real
+      // upgrade.
+      setIsPremium(nextPlan !== 'free');
 
       // Default the counter to this plan's cap so hosts see the most
       // attendees they can have by default; if they'd already nudged the
@@ -88,6 +112,16 @@ export default function CreateSession({ navigation }) {
       } else {
         setHostMinutes(0);
       }
+
+      // Fetch participant minutes balance — flat, purchased balance on
+      // profiles (see StoreScreen.js), separate from the plan-based
+      // usage_ledger row hostMinutes comes from above.
+      const { data: minutesProfile } = await supabase
+        .from('profiles')
+        .select('participant_minutes_balance')
+        .eq('id', user.id)
+        .maybeSingle();
+      setParticipantMinutes(Math.max(0, minutesProfile?.participant_minutes_balance ?? 0));
     })();
   }, []);
 
@@ -173,12 +207,18 @@ export default function CreateSession({ navigation }) {
     return setError(`Your ${planInfo.name} plan allows up to ${attendeeLimit} attendees. Please lower the attendee count or upgrade your plan.`);
   }
   
-  // Check if hosting minutes are exhausted (<= 1 means less than 2)
-  if (hostMinutes !== null && hostMinutes <= 1) {
+  // Check if the selected minute pool is exhausted (<= 1 means less
+  // than 2) — whichever source minuteSource points at is what this
+  // session will actually bill against, so that's the one to check.
+  if (minuteSource === 'host' && hostMinutes !== null && hostMinutes <= 1) {
     const message = isPremium 
       ? 'Cannot create session, hosting minutes exhausted'
       : 'Cannot create session, hosting minutes exhausted, upgrade to Premium for higher limits';
     showAlert('Insufficient Minutes', message);
+    return;
+  }
+  if (minuteSource === 'participant' && participantMinutes !== null && participantMinutes <= 1) {
+    showAlert('Insufficient Minutes', 'Cannot create session, participant minutes exhausted — buy more from the Store.');
     return;
   }
 
@@ -201,6 +241,7 @@ export default function CreateSession({ navigation }) {
         default_mic_on: micOn,
         allow_guests: allowGuests,
         lobby_music: lobbyMusic,
+        minute_source: minuteSource,
       })
       .select()
       .single();
@@ -301,6 +342,37 @@ export default function CreateSession({ navigation }) {
           )}
         </Text>
 
+        <Text style={styles.label}>Bill This Session Against</Text>
+        <View style={styles.minuteSourceRow}>
+          <TouchableOpacity
+            style={[styles.minuteSourceOption, minuteSource === 'host' && styles.minuteSourceOptionActive]}
+            onPress={() => setMinuteSource('host')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="person-outline" size={16} color={minuteSource === 'host' ? palette.surface : palette.ink} />
+            <Text style={[styles.minuteSourceLabel, minuteSource === 'host' && styles.minuteSourceLabelActive]}>My Hosting Minutes</Text>
+            <Text style={[styles.minuteSourceBalance, minuteSource === 'host' && styles.minuteSourceLabelActive]}>
+              {hostMinutes === null ? '...' : `${hostMinutes} left`}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.minuteSourceOption, minuteSource === 'participant' && styles.minuteSourceOptionActive]}
+            onPress={() => setMinuteSource('participant')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="people-circle-outline" size={16} color={minuteSource === 'participant' ? palette.surface : palette.ink} />
+            <Text style={[styles.minuteSourceLabel, minuteSource === 'participant' && styles.minuteSourceLabelActive]}>Participant Minutes</Text>
+            <Text style={[styles.minuteSourceBalance, minuteSource === 'participant' && styles.minuteSourceLabelActive]}>
+              {participantMinutes === null ? '...' : `${participantMinutes} left`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.attendeeLimitHint}>
+          {minuteSource === 'host'
+            ? 'Uses minutes from your plan\u2019s monthly allowance.'
+            : 'Uses your purchased participant-minute balance instead — buy more from the Store.'}
+        </Text>
+
         <Text style={styles.label}>Session Password</Text>
         <View style={styles.inputRow}>
           <Ionicons name="lock-closed-outline" size={17} color={palette.neutralText} style={styles.inputIcon} />
@@ -392,7 +464,11 @@ export default function CreateSession({ navigation }) {
   );
 }
 
-
+const cardShadow = Platform.select({
+  ios: { shadowColor: '#2A1A6B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 10 },
+  android: { elevation: 2 },
+  default: { boxShadow: '0 4px 12px rgba(42,26,107,0.06)' },
+});
 
 const launchShadow = Platform.select({
   ios: { shadowColor: palette.primaryDeep, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.26, shadowRadius: 16 },
@@ -430,6 +506,12 @@ const styles = StyleSheet.create({
   waitlistRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   waitlistLabel: { fontSize: 13, fontWeight: '700', color: palette.ink },
   attendeeLimitHint: { fontSize: 11.5, color: palette.inkMuted, fontWeight: '600', marginTop: 6 },
+  minuteSourceRow: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  minuteSourceOption: { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: palette.line, backgroundColor: palette.surface, padding: 12, gap: 4 },
+  minuteSourceOptionActive: { backgroundColor: palette.primary, borderColor: palette.primary },
+  minuteSourceLabel: { fontSize: 12.5, fontWeight: '700', color: palette.ink, marginTop: 2 },
+  minuteSourceLabelActive: { color: palette.surface },
+  minuteSourceBalance: { fontSize: 11, fontWeight: '600', color: palette.inkMuted },
   attendeeLimitLink: { color: palette.primary, fontWeight: '700' },
 
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface, borderRadius: 13, paddingHorizontal: 14, borderWidth: 1, borderColor: palette.line, height: 52, ...cardShadow },

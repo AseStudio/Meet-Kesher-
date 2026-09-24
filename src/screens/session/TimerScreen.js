@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getPlan } from '../../lib/constants';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 
 export default function TimerScreen({ navigation, route }) {
   const session = route.params?.session;
+  // Which pool this session actually bills against — set once at
+  // creation (CreateSession.js) and stored on sessions.minute_source;
+  // see SessionMain.js's periodic tick, which bills whichever this is.
+  const activeSource = session?.minute_source === 'participant' ? 'participant' : 'host';
   const [hostMinutes, setHostMinutes] = useState(null);
+  const [participantMinutes, setParticipantMinutes] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
+  const [plan, setPlan] = useState('free');
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [notificationShown, setNotificationShown] = useState({ five: false, zero: false });
@@ -22,13 +29,18 @@ export default function TimerScreen({ navigation, route }) {
           return;
         }
 
-        // Fetch premium status
+        // Fetch plan (is_premium is a DB column nothing ever writes
+        // after checkout — the webhook only updates profiles.plan — so
+        // it's always false/null; derive "premium" from plan instead,
+        // same as CommunityScreen/CreateSession).
         const { data: profile } = await supabase
           .from('profiles')
-          .select('is_premium')
+          .select('plan, participant_minutes_balance')
           .eq('id', user.id)
           .maybeSingle();
-        setIsPremium(!!profile?.is_premium);
+        setIsPremium(!!profile?.plan && profile.plan !== 'free');
+        setPlan(profile?.plan || 'free');
+        setParticipantMinutes(Math.max(0, profile?.participant_minutes_balance ?? 0));
 
         // Fetch hosting minutes balance
         const { data: usageRow } = await supabase.rpc('get_my_usage');
@@ -51,12 +63,18 @@ export default function TimerScreen({ navigation, route }) {
     loadData();
   }, []);
 
-  // Countdown effect
+  // Countdown effect — counts down whichever pool this session is
+  // actually billing against (activeSource), same as SessionMain.js's
+  // real billing tick. The other pool is still displayed (fetched
+  // above) but doesn't tick locally here, since this session isn't
+  // spending it.
   useEffect(() => {
-    if (hostMinutes === null || hostMinutes === 0) return;
+    const activeMinutes = activeSource === 'participant' ? participantMinutes : hostMinutes;
+    if (activeMinutes === null || activeMinutes === 0) return;
 
     const interval = setInterval(() => {
-      setHostMinutes(prev => {
+      const setActive = activeSource === 'participant' ? setParticipantMinutes : setHostMinutes;
+      setActive(prev => {
         if (prev === null) return null;
         const newMinutes = Math.max(0, prev - 1);
         
@@ -90,7 +108,7 @@ export default function TimerScreen({ navigation, route }) {
     }, 60000); // Update every minute
 
     return () => clearInterval(interval);
-  }, [hostMinutes, notificationShown, isPremium]);
+  }, [hostMinutes, participantMinutes, activeSource, notificationShown, isPremium]);
 
   const endSession = async () => {
     if (!session?.id) {
@@ -123,7 +141,8 @@ export default function TimerScreen({ navigation, route }) {
     return mins.toString();
   };
 
-  const isLow = hostMinutes !== null && hostMinutes <= 5;
+  const isLow = (activeSource === 'participant' ? participantMinutes : hostMinutes) !== null
+    && (activeSource === 'participant' ? participantMinutes : hostMinutes) <= 5;
 
   if (loading) {
     return (
@@ -159,17 +178,40 @@ export default function TimerScreen({ navigation, route }) {
       </View>
 
       <View style={styles.content}>
-        {/* Hosting Minutes Display */}
+        {/* Active pool's ring — whichever this session is actually
+            billing against (activeSource). */}
         <View style={[styles.minutesRing, isLow && styles.minutesRingRed]}>
           <View style={styles.minutesInner}>
             <Text style={[styles.minutesDisplay, isLow && styles.minutesDisplayRed]}>
-              {formatMinutes(hostMinutes)}
+              {formatMinutes(activeSource === 'participant' ? participantMinutes : hostMinutes)}
             </Text>
             <View style={styles.minutesSubtextRow}>
               <Text style={styles.minutesSubtext}>
-                {hostMinutes === 0 ? 'No minutes left' : 'minutes remaining'}
+                {(activeSource === 'participant' ? participantMinutes : hostMinutes) === 0 ? 'No minutes left' : 'minutes remaining'}
               </Text>
             </View>
+          </View>
+        </View>
+
+        {/* Both pools, side by side — the active one (the one this
+            session is actually consuming) is highlighted so it's clear
+            at a glance which balance is ticking down. */}
+        <View style={styles.poolRow}>
+          <View style={[styles.poolCard, activeSource === 'host' && styles.poolCardActive]}>
+            {activeSource === 'host' && (
+              <View style={styles.poolBadge}><Text style={styles.poolBadgeText}>IN USE</Text></View>
+            )}
+            <Ionicons name="person-outline" size={16} color={activeSource === 'host' ? colors.white : 'rgba(255,255,255,0.5)'} />
+            <Text style={[styles.poolValue, activeSource === 'host' && styles.poolValueActive]}>{formatMinutes(hostMinutes)}</Text>
+            <Text style={styles.poolLabel}>Hosting Minutes</Text>
+          </View>
+          <View style={[styles.poolCard, activeSource === 'participant' && styles.poolCardActive]}>
+            {activeSource === 'participant' && (
+              <View style={styles.poolBadge}><Text style={styles.poolBadgeText}>IN USE</Text></View>
+            )}
+            <Ionicons name="people-circle-outline" size={16} color={activeSource === 'participant' ? colors.white : 'rgba(255,255,255,0.5)'} />
+            <Text style={[styles.poolValue, activeSource === 'participant' && styles.poolValueActive]}>{formatMinutes(participantMinutes)}</Text>
+            <Text style={styles.poolLabel}>Participant Minutes</Text>
           </View>
         </View>
 
@@ -185,9 +227,11 @@ export default function TimerScreen({ navigation, route }) {
         <View style={styles.infoCard}>
           <Ionicons name="information-circle-outline" size={17} color="rgba(255,255,255,0.6)" />
           <Text style={styles.infoText}>
-            {isPremium 
-              ? 'You have unlimited session minutes as a Premium user.'
-              : 'Free users get 30 minutes per month. Upgrade to Premium for unlimited sessions.'
+            {activeSource === 'participant'
+              ? 'This session is billing against your purchased participant-minute balance, not your plan\u2019s hosting minutes.'
+              : (isPremium 
+                ? `You're on the ${getPlan(plan).name} plan — ${getPlan(plan).hostMinutes} hosting minutes per session.`
+                : 'Free hosts get 30 minutes per session. Upgrade for more hosting time.')
             }
           </Text>
         </View>
@@ -209,21 +253,21 @@ const styles = StyleSheet.create({
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: colors.white, letterSpacing: -0.2 },
   content: { flex: 1, padding: 24, alignItems: 'center', gap: 20 },
-  minutesRing: {
-    width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative',
-    ...Platform.select({
-      ios: { shadowColor: colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.35, shadowRadius: 24 },
-      android: { elevation: 10 },
-      default: { boxShadow: `0 0 40px ${colors.primary}55` },
-    }),
-  },
+  minutesRing: { width: 220, height: 220, borderRadius: 110, borderWidth: 8, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E1E3F', overflow: 'hidden', position: 'relative' },
   minutesRingRed: { borderColor: colors.red },
   minutesInner: { alignItems: 'center', zIndex: 2 },
   minutesDisplay: { fontSize: 72, fontWeight: '800', color: colors.white, fontVariant: ['tabular-nums'] },
   minutesDisplayRed: { color: colors.red },
   minutesSubtextRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
   minutesSubtext: { color: 'rgba(255,255,255,0.55)', fontSize: 14, fontWeight: '600' },
+  poolRow: { flexDirection: 'row', gap: 12, width: '100%' },
+  poolCard: { flex: 1, backgroundColor: '#1E1E3F', borderRadius: 14, padding: 14, alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.08)', position: 'relative' },
+  poolCardActive: { borderColor: colors.primary, backgroundColor: colors.primary + '33' },
+  poolBadge: { position: 'absolute', top: -8, alignSelf: 'center', backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  poolBadgeText: { color: colors.white, fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
+  poolValue: { fontSize: 22, fontWeight: '800', color: 'rgba(255,255,255,0.6)', fontVariant: ['tabular-nums'], marginTop: 4 },
+  poolValueActive: { color: colors.white },
+  poolLabel: { fontSize: 10.5, fontWeight: '600', color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
   upgradeCard: { flexDirection: 'row', gap: 10, backgroundColor: colors.yellow + '1A', borderRadius: 14, padding: 14, width: '100%', borderWidth: 1, borderColor: colors.yellow + '40', alignItems: 'center' },
   upgradeText: { flex: 1, color: colors.yellow, fontSize: 14, fontWeight: '700' },
   infoCard: { flexDirection: 'row', gap: 11, backgroundColor: '#1E1E3F', borderRadius: 14, padding: 14, width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', alignItems: 'flex-start' },
