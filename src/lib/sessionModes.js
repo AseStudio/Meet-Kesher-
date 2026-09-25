@@ -17,11 +17,14 @@ const CAPABILITIES = {
     board: true,
     boardTypes: ['whiteboard', 'blackboard', 'graph'],
     agenda: true,
-    poll: true,
+    poll: false,
     chat: true,
     reactions: true,
     signals: true, // raise hand / correction / speak
     documents: false,
+    coHost: true,
+    waitlist: true,
+    record: true,
     allowGuests: true,
     maxParticipants: null, // host-set max_attendees applies, no extra cap
   },
@@ -34,6 +37,9 @@ const CAPABILITIES = {
     reactions: false,
     signals: false,
     documents: true, // host <-> applicant file exchange
+    coHost: false,
+    waitlist: false,
+    record: true,
     allowGuests: false, // guests have no session_attendees row, so the
     // 2-person cap (enforced in the DB) can't see or count them —
     // simplest correct fix is not allowing them in interview sessions
@@ -48,7 +54,10 @@ const CAPABILITIES = {
     chat: true,
     reactions: true,
     signals: true,
-    documents: false,
+    documents: true, // agenda/board/materials exchange
+    coHost: true,
+    waitlist: true,
+    record: true,
     allowGuests: true,
     maxParticipants: null,
   },
@@ -61,6 +70,9 @@ const CAPABILITIES = {
     reactions: true,
     signals: false,
     documents: false,
+    coHost: false,
+    waitlist: false,
+    record: true,
     allowGuests: true,
     maxParticipants: null,
   },

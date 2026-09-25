@@ -1510,6 +1510,10 @@ function getProfileKey(uplink = 0, downlink = 0) {
   const tools = [
     { icon: muted ? 'mic-off-outline' : 'mic-outline', label: 'Mic', action: toggleMic, active: muted },
     { icon: cameraOff ? 'videocam-off-outline' : 'videocam-outline', label: 'Cam', action: toggleCamera, active: cameraOff },
+    // Interview + Meeting only (host <-> attendee file exchange) — see
+    // DocumentExchangePanel.js. This screen existed in the codebase but
+    // nothing ever navigated to it until now.
+    ...(capabilities.documents ? [{ icon: 'document-attach-outline', label: 'Files', action: () => navigation.navigate('DocumentExchangePanel', { session, currentUser: hostUser, isHost: true }) }] : []),
     // Web only — native has no screen-capture implementation yet (see
     // AgoraService.native.js), so rather than show a button that always
     // silently no-ops there, it just doesn't exist on that platform.
@@ -1520,15 +1524,17 @@ function getProfileKey(uplink = 0, downlink = 0) {
     { icon: 'timer-outline', label: 'Timer', action: () => navigation.navigate('TimerScreen', { session }) },
     ...(capabilities.chat ? [{ icon: 'chatbubble-outline', label: 'Chat', action: openChat, badge: unreadCount }] : []),
     ...(capabilities.reactions ? [{ icon: 'happy-outline', label: 'React', action: () => setShowReactions(true) }] : []),
-    { icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length },
-    { icon: 'people-outline', label: 'Waitlist', action: () => navigation.navigate('Waitlist', { session }), badge: waitlistCount },
+    ...(capabilities.coHost ? [{ icon: 'star-outline', label: 'Co-host', action: () => setShowCoHostManager(true), badge: Object.keys(coHosts).length }] : []),
+    ...(capabilities.waitlist ? [{ icon: 'people-outline', label: 'Waitlist', action: () => navigation.navigate('Waitlist', { session }), badge: waitlistCount }] : []),
     // Free hosts never see this at all — not shown-then-blocked, just
     // absent. canRecord starts false until the plan fetch resolves, so
     // this also means the button briefly doesn't exist for an eligible
     // host in the first instant after mount; that's an acceptable
     // trade-off for "free users never even see it" over a flash of an
     // enabled-then-disabled button while the check is in flight.
-    ...(canRecord ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
+    // Also gated by capabilities.record — Meeting mode doesn't offer
+    // recording regardless of plan.
+    ...(canRecord && capabilities.record ? [{ icon: recording ? 'stop-circle' : 'radio-button-on', label: 'Record', action: toggleRecording, red: true }] : []),
     // Explicit no-arg wrapper, not `action: endSession` directly — this
     // button is wired up as `onPress={tool.action}`, and onPress hands
     // its synthetic event through as the first argument. endSession's

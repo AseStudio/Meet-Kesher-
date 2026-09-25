@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   FlatList, ActivityIndicator, Alert
@@ -59,6 +59,22 @@ export default function ChannelsTab({ navigation }) {
   useEffect(() => {
     loadChannels('');
   }, [loadChannels]);
+
+  // Keep the latest search term available to the focus listener below
+  // without having to resubscribe it on every keystroke.
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+
+  // Reload whenever this tab's screen regains focus — e.g. coming back
+  // from creating a channel, or from ChannelChat — so a newly created
+  // (public) channel or updated member counts show up without the user
+  // having to manually pull-to-refresh or reopen the app.
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => loadChannels(queryRef.current));
+    return unsub;
+  }, [navigation, loadChannels]);
 
   const joinChannel = async (channelId) => {
     if (!userId) return;

@@ -40,6 +40,7 @@ import CoHostManager from './src/screens/session/CoHostManager';
 import SessionFull from './src/screens/session/SessionFull';
 import BannedScreen from './src/screens/session/BannedScreen';
 import WelcomeScreen from './src/screens/WelcomeScreen';
+import DocumentExchangePanel from './src/screens/session/DocumentExchangePanel';
 
 import CommunityScreen from './src/screens/community/CommunityScreen';
 import ComposePostScreen from './src/screens/community/ComposePostScreen';
@@ -143,6 +144,7 @@ export default function App() {
           <Stack.Screen name="SessionFull" component={SessionFull} />
           <Stack.Screen name="BannedScreen" component={BannedScreen} />
           <Stack.Screen name="Waitlist" component={WaitlistScreen} />
+          <Stack.Screen name="DocumentExchangePanel" component={withErrorBoundary(DocumentExchangePanel)} options={PANEL_ANIMATION} />
 
 
           {/* Community feature */}

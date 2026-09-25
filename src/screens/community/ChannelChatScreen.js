@@ -74,8 +74,9 @@ export default function ChannelChatScreen({ navigation, route }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime — new messages from the supervisor/assistant show up live
-  // for everyone in the channel without a manual refresh.
+  // Realtime — new messages show up live for everyone in the channel
+  // without a manual refresh. Guards against double-adding a message
+  // the sender already appended optimistically in send() below.
   useEffect(() => {
     const sub = supabase
       .channel(`channel_messages:${channelId}`)
@@ -83,7 +84,9 @@ export default function ChannelChatScreen({ navigation, route }) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'channel_messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
+          setMessages((prev) => (
+            prev.some((m) => m.id === payload.new.id) ? prev : [...prev, payload.new]
+          ));
         }
       )
       .subscribe();
@@ -96,13 +99,40 @@ export default function ChannelChatScreen({ navigation, route }) {
     setSending(true);
     const body = draft.trim();
     setDraft('');
-    const { error } = await supabase.from('channel_messages').insert({
+
+    // Optimistic: show the message immediately instead of waiting on the
+    // realtime echo (which needs Realtime enabled for this table, and
+    // even then adds a round-trip of latency). A temp id keeps it
+    // distinguishable until the real row comes back; the realtime
+    // handler above dedupes on the final id so it isn't added twice.
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
       channel_id: channelId,
       author_id: userId,
       body,
-    });
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
+
+    const { data, error } = await supabase
+      .from('channel_messages')
+      .insert({
+        channel_id: channelId,
+        author_id: userId,
+        body,
+      })
+      .select('id, body, attachment_url, created_at, author_id')
+      .single();
+
     setSending(false);
-    if (error) showAlert('Could not send', error.message);
+    if (error) {
+      showAlert('Could not send', error.message);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setDraft(body);
+    } else if (data) {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? data : m)));
+    }
   };
 
   const toggleReaction = async (messageId) => {
